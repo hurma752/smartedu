@@ -27,7 +27,7 @@ class AssignTeacherRequest(BaseModel):
 
 
 class EnrollStudentRequest(BaseModel):
-    student_email: EmailStr
+    student_identifier: str
 
 
 class UserSummary(BaseModel):
@@ -36,6 +36,8 @@ class UserSummary(BaseModel):
     full_name: str
     role: str
     is_active: bool
+    registration_number: Optional[str] = None
+    has_set_password: bool = False  # ADD THIS LINE
     created_at: datetime
 
     class Config:

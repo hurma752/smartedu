@@ -16,37 +16,58 @@ from app.schemas.admin import (
 )
 from app.schemas.auth import AdminCreateUser, TokenResponse
 from app.utils.auth import require_role, hash_password, create_access_token
+from app.utils.tokens import create_reset_token
+from app.services.email_service import send_account_setup_email, send_enrollment_notification
+
 
 router = APIRouter()
 
 
 # ---------- User management ----------
 
-@router.post("/users", response_model=TokenResponse)
+
+@router.post("/users", response_model=dict)
 def create_user(
     payload: AdminCreateUser,
     current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    if payload.role not in ("teacher", "student"):
-        raise HTTPException(400, "Admin can only create 'teacher' or 'student' accounts here")
+    # Pydantic already validated role, full_name, and registration_number
+    # rules above — if we reach here, those are all structurally valid
 
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
-        raise HTTPException(400, "Email already registered")
+        raise HTTPException(400, "An account with this email already exists")
+
+    if payload.registration_number:
+        existing_reg = db.query(User).filter(
+            User.registration_number == payload.registration_number
+        ).first()
+        if existing_reg:
+            raise HTTPException(400, f"Registration number {payload.registration_number} is already assigned to another account")
 
     user = User(
         email=payload.email,
-        password_hash=hash_password(payload.password),
+        password_hash=None,
         full_name=payload.full_name,
         role=payload.role,
+        registration_number=payload.registration_number,
+        has_set_password=False,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    token = create_access_token({"sub": str(user.id), "role": user.role})
-    return TokenResponse(access_token=token, role=user.role, full_name=user.full_name, user_id=user.id)
+    setup_token = create_reset_token(db, user.id, expires_minutes=48 * 60)
+    email_sent = send_account_setup_email(user.email, user.full_name, setup_token)
+
+    return {
+        "message": f"Account created for {user.email}. {'Setup email sent.' if email_sent else 'Email could not be sent — check SMTP configuration.'}",
+        "email_sent": email_sent,
+        "user_id": user.id,
+        "pending_verification": True,
+    }
+
 
 
 @router.get("/users", response_model=List[UserSummary])
@@ -192,14 +213,17 @@ def enroll_student(
     if not course:
         raise HTTPException(404, "Course not found")
 
+    # Now accepts either email OR registration number for lookup
     student = db.query(User).filter(
-        User.email == payload.student_email, User.role == "student"
+        User.role == "student",
+        (User.email == payload.student_identifier) |
+        (User.registration_number == payload.student_identifier)
     ).first()
     if not student:
-        raise HTTPException(404, "No student found with that email")
+        raise HTTPException(404, "No student found with that email or registration number")
 
     existing = db.query(Enrollment).filter(
-        Enrollment.course_id == course_id, Enrollment.student_id == student.id,
+        Enrollment.course_id == course_id, Enrollment.student_id == student.id
     ).first()
     if existing:
         raise HTTPException(400, "Student already enrolled")
@@ -209,6 +233,10 @@ def enroll_student(
     )
     db.add(enrollment)
     db.commit()
+
+    # Notify the student
+    send_enrollment_notification(student.email, student.full_name, course.name, course.code)
+
     return {"message": f"{student.full_name} enrolled in {course.name}"}
 
 
@@ -227,3 +255,62 @@ def unenroll_student(
     db.delete(enrollment)
     db.commit()
     return {"message": "Student unenrolled"}
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently deletes a user account and all associated data.
+    Admin accounts cannot be deleted, even by another admin.
+    The cascade rules on the foreign keys handle cleanup of related
+    rows (enrollments, submissions, chat history, etc.) automatically.
+    """
+    if user_id == current_user.id:
+        raise HTTPException(400, "You cannot delete your own admin account")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    if user.role == "admin":
+        raise HTTPException(403, "Admin accounts cannot be deleted")
+
+    user_email = user.email
+    user_name = user.full_name
+    db.delete(user)
+    db.commit()
+
+    return {"message": f"Account for {user_name} ({user_email}) permanently deleted"}
+
+
+@router.post("/users/{user_id}/resend-setup-email")
+def resend_setup_email(
+    user_id: int,
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """
+    Resends the account setup email for accounts that haven't verified yet.
+    Useful when a user says they never received the original email.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    if user.has_set_password:
+        raise HTTPException(400, "This account has already been verified")
+
+    # Invalidate any existing unused tokens for this user before issuing a new one
+    from app.models.models import PasswordResetToken
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user_id,
+        PasswordResetToken.used == False
+    ).update({"used": True})
+    db.commit()
+
+    setup_token = create_reset_token(db, user.id, expires_minutes=48 * 60)
+    email_sent = send_account_setup_email(user.email, user.full_name, setup_token)
+
+    return {"message": "Setup email resent" if email_sent else "Failed to send email — check SMTP configuration"}

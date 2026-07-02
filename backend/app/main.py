@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import auth, admin, courses, documents, chat
 import ollama
 from app.config import settings
-
+from app.routers import auth, admin, courses, documents, chat, password, assignments
 app = FastAPI(
     title="SmartEdu API",
     description="AI-powered Learning Management System",
@@ -19,11 +19,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(password.router, prefix="/api/password", tags=["Password"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(courses.router, prefix="/api/courses", tags=["Courses"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chatbot"])
+
+app.include_router(assignments.router, prefix="/api/assignments", tags=["Assignments"])
+
 
 
 @app.on_event("startup")
@@ -48,3 +52,4 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+

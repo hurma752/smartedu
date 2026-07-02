@@ -1,41 +1,107 @@
 # app/services/ocr_service.py
 # This module extracts text from PDF files
 
-import fitz  # This is PyMuPDF — imported as "fitz" for historical reasons
 import re
-def extract_text_from_pdf(file_path: str) -> str:
+import cv2
+import numpy as np
+from PIL import Image
+import pytesseract
+import fitz  # This is PyMuPDF — imported as "fitz" for historical reasons
+
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+def preprocess_image_for_ocr(pil_image: Image.Image) -> Image.Image:
     """
-    Extract all text from a PDF file.
-    
-    Strategy:
-    1. Try to extract text directly (works for typed/digital PDFs perfectly)
-    2. If a page has no text (scanned image), we skip it for now
-       (Tesseract OCR for scanned PDFs is Phase 2 of this module)
-    
-    Returns: full extracted text as a single string
+    Cleans up a scanned page image before OCR. Helps meaningfully with
+    scanned PRINTED text; helps only marginally with true handwriting,
+    since the core problem there isn't image noise — it's that Tesseract
+    was never trained to recognize handwritten letterforms at all.
     """
-    try:
-        doc = fitz.open(file_path)
-        full_text = []
-        
-        for page_num, page in enumerate(doc):
-            # get_text() extracts text from a digital PDF page
-            # Returns empty string if page is a scanned image
-            page_text = page.get_text()
-            
-            if page_text.strip():
-                # Page has text (typed PDF)
-                full_text.append(f"[Page {page_num + 1}]\n{page_text}")
-            else:
-                # Page has no extractable text (scanned)
-                # For now, note this and skip
-                full_text.append(f"[Page {page_num + 1}: scanned image - text extraction not available]")
-        
-        doc.close()
-        return "\n\n".join(full_text)
-    
-    except Exception as e:
-        raise ValueError(f"Failed to extract text from PDF: {str(e)}")
+    img = np.array(pil_image.convert("L"))  # grayscale
+
+    # Denoise — removes scan artifacts/specks that confuse character matching
+    img = cv2.fastNlMeansDenoising(img, h=10)
+
+    # Adaptive thresholding — converts to clean black/white, robust to
+    # uneven lighting across a scanned page (much better than a single
+    # global threshold for real-world phone-camera scans)
+    img = cv2.adaptiveThreshold(
+        img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
+    )
+
+    return Image.fromarray(img)
+
+
+def extract_text_from_pdf(file_path: str) -> dict:
+    """
+    Returns a dict instead of a bare string:
+    {
+        "text": str,                  # best-effort extracted text
+        "method": "typed" | "ocr",    # how it was extracted
+        "confidence": float | None,   # average OCR confidence (0-100), None for typed PDFs
+        "low_confidence": bool,       # True if OCR text is likely unreliable
+    }
+    Callers (rag_service ingestion, evaluation_service) must read .text
+    from this rather than treating the return value as a plain string.
+
+    Tesseract config notes:
+    - oem 1 = LSTM engine (default, generally best for printed text)
+    - psm 6 = "assume a single uniform block of text", which tends to
+      perform more consistently than the default psm 3 on scanned
+      assignment pages (single column, no complex layout). This is a
+      free, zero-dependency tuning step — modest but real improvement
+      on handwriting-adjacent and scanned printed text alike.
+    """
+    TESSERACT_CONFIG = "--oem 1 --psm 6"
+
+    doc = fitz.open(file_path)
+    full_text_parts = []
+    used_ocr = False
+    confidences = []
+
+    for page in doc:
+        page_text = page.get_text()
+
+        if page_text.strip():
+            full_text_parts.append(page_text)
+        else:
+            used_ocr = True
+            pix = page.get_pixmap(dpi=300)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            img = preprocess_image_for_ocr(img)
+
+            # image_to_data gives per-word confidence, unlike image_to_string
+            # which only gives raw text with no quality signal at all
+            ocr_data = pytesseract.image_to_data(
+                img, config=TESSERACT_CONFIG, output_type=pytesseract.Output.DICT
+            )
+
+            page_words = []
+            for i, word in enumerate(ocr_data["text"]):
+                conf = int(ocr_data["conf"][i])
+                if word.strip() and conf > 0:  # conf == -1 means "no text detected" for that box
+                    page_words.append(word)
+                    confidences.append(conf)
+
+            full_text_parts.append(" ".join(page_words))
+
+    doc.close()
+
+    full_text = "\n\n".join(full_text_parts).strip()
+    avg_confidence = sum(confidences) / len(confidences) if confidences else None
+
+    # Threshold chosen empirically: Tesseract confidence below ~40 on
+    # average reliably correlates with garbage output in practice —
+    # either handwriting it couldn't parse, or a very poor scan
+    low_confidence = used_ocr and (avg_confidence is None or avg_confidence < 40)
+
+    return {
+        "text": full_text,
+        "method": "ocr" if used_ocr else "typed",
+        "confidence": avg_confidence,
+        "low_confidence": low_confidence,
+    }
+
 
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
     """
@@ -53,9 +119,6 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str
     if not text.strip():
         return []
 
-    # Split on sentence boundaries (. ! ?) followed by whitespace.
-    # Not perfect (abbreviations like "Dr." will mis-split occasionally)
-    # but far better than character-count slicing for FYP purposes.
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
 
     chunks = []
@@ -66,11 +129,8 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str
         sentence_len = len(sentence)
 
         if current_length + sentence_len > chunk_size and current_chunk:
-            # Current chunk is full — save it and start a new one
             chunks.append(" ".join(current_chunk))
 
-            # Build overlap: carry the last sentence(s) into the next chunk
-            # so context isn't lost at the boundary
             overlap_sentences = []
             overlap_len = 0
             for s in reversed(current_chunk):

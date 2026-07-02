@@ -4,14 +4,20 @@ Orchestrates: PDF -> text -> chunks -> embeddings -> ChromaDB.
 Also updates the Document row's status so the frontend can poll progress
 instead of guessing whether a background task finished.
 """
+
+
 import os
+import json
+import ollama
 from sqlalchemy.orm import Session
-from app.services.ocr_service import extract_text_from_pdf, chunk_text
+
 from app.rag.embeddings import get_embeddings, get_single_embedding
 from app.rag.vector_store import add_chunks_to_collection, search_similar_chunks
-from app.models.models import Document
+from app.services.lms_context_service import build_lms_context
+from app.services.intent_classifier import classify_intent
+from app.models.models import Document, Submission
 from app.config import settings
-import ollama
+from app.services.ocr_service import extract_text_from_pdf, chunk_text
 
 
 def ingest_document_task(document_id: int, file_path: str, course_id: int, db_session_factory):
@@ -22,12 +28,19 @@ def ingest_document_task(document_id: int, file_path: str, course_id: int, db_se
     fresh session, opened and closed inside this function.
     """
     db: Session = db_session_factory()
+    document = None
     try:
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
             return  # shouldn't happen, but don't crash silently if it does
 
-        raw_text = extract_text_from_pdf(file_path)
+        # extract_text_from_pdf now returns a DICT (text/method/confidence/
+        # low_confidence), not a plain string — unwrap .text here. This is
+        # the one line that needed to change after the OCR confidence-gating
+        # update; everything else in this function is unaffected.
+        extraction = extract_text_from_pdf(file_path)
+        raw_text = extraction["text"]
+
         if not raw_text.strip():
             document.status = "failed"
             document.error_message = "No text could be extracted from this PDF"
@@ -57,36 +70,76 @@ def ingest_document_task(document_id: int, file_path: str, course_id: int, db_se
     except Exception as e:
         # Always leave a record of WHY it failed — silent failures are
         # what made your original bug hard to diagnose
-        document.status = "failed"
-        document.error_message = str(e)
-        db.commit()
+        if document:
+            document.status = "failed"
+            document.error_message = str(e)
+            db.commit()
     finally:
         db.close()
 
 
-def answer_question(question: str, course_id: int) -> dict:
-    question_embedding = get_single_embedding(question)
-    relevant_chunks = search_similar_chunks(course_id, question_embedding, n_results=3)
+def answer_question(question: str, course_id: int, student_id: int, db: Session) -> dict:
+    """
+    Hybrid RAG: combines LMS database context with document retrieval
+    depending on the intent of the student's question.
 
-    if not relevant_chunks:
-        return {"answer": "No course material has been indexed for this course yet.", "sources": []}
+    Now requires student_id and db so it can fetch personalised LMS data.
+    """
+    intent = classify_intent(question)
+    lms_context = ""
+    document_chunks = []
 
-    relevant_chunks = [chunk[:1000] for chunk in relevant_chunks]
-    context = "\n\n---\n\n".join(relevant_chunks)
+    # Build LMS context if the question is about course structure/metadata
+    if intent in ("lms", "hybrid"):
+        lms_context = build_lms_context(course_id, student_id, db)
 
-    prompt = f"""You are a helpful academic assistant for students.
-Answer the student's question using ONLY the course material provided below.
-If the answer is not in the provided material, say "I couldn't find information about this in the course material."
-Give a complete, well-organized answer. Keep it focused — aim for 3-4 solid paragraphs maximum.
-Always finish your answer with a complete sentence; do not leave any thought unfinished.
+    # Retrieve document chunks if the question might need course content
+    if intent in ("document", "hybrid"):
+        question_embedding = get_single_embedding(question)
+        document_chunks = search_similar_chunks(course_id, question_embedding, n_results=3)
 
-COURSE MATERIAL:
-{context}
+    # Build the prompt — sections only included when they have content
+    # app/services/rag_service.py — update prompt_parts in BOTH answer_question and answer_question_stream
 
-STUDENT QUESTION:
-{question}
+    prompt_parts = [
+        "You are SmartEdu, an intelligent academic assistant integrated into a Learning Management System.",
+        "",
+        "STRICT RULES:",
+        "1. Use ONLY the information provided in the sections below. Never invent or assume facts.",
+        "2. For counts, dates, names, and grades — quote the exact values from LMS INFORMATION.",
+        "3. For content explanations — use COURSE MATERIAL excerpts only.",
+        "4. If information is not available, say clearly: 'This information is not available in the system.'",
+        "5. Never say 'check the course dashboard' or 'contact your instructor' — you ARE the system.",
+        "6. Keep answers focused and specific. Do not pad with unnecessary text.",
+        "7. If asking about grades/rubrics and the student has no submissions yet, say so directly.",
+        "",
+    ]
 
-ANSWER:"""
+    if lms_context:
+        prompt_parts.append("=== COURSE & LMS INFORMATION ===")
+        prompt_parts.append(lms_context)
+        prompt_parts.append("")
+
+    if document_chunks:
+        prompt_parts.append("=== COURSE MATERIAL (from uploaded lectures) ===")
+        for i, chunk in enumerate(document_chunks, 1):
+            prompt_parts.append(f"[Excerpt {i}]: {chunk[:800]}")
+        prompt_parts.append("")
+
+    # Replace the existing no-data return in answer_question:
+    if not lms_context and not document_chunks:
+        return {
+            "answer": "I don't have enough information to answer that question. "
+                    "This course may not have any uploaded materials or assignments yet.",
+            "sources": [],
+            "intent": intent,
+        }
+
+    prompt_parts.append(f"STUDENT QUESTION: {question}")
+    prompt_parts.append("")
+    prompt_parts.append("ANSWER:")
+
+    prompt = "\n".join(prompt_parts)
 
     response = ollama.chat(
         model=settings.OLLAMA_MODEL,
@@ -94,55 +147,64 @@ ANSWER:"""
         options={
             "num_predict": 800,
             "num_ctx": 3072,
-            "temperature": 0.3,
+            "temperature": 0.2,
             "num_thread": os.cpu_count(),
         },
     )
 
-    answer = response["message"]["content"]
-
-    # done_reason == "length" means Ollama hit num_predict and was forced
-    # to stop — as opposed to "stop", which means the model finished
-    # naturally. Flag this honestly instead of presenting a cut sentence
-    # as if it were the complete answer.
-    if response.get("done_reason") == "length":
-        answer += "\n\n*(This answer was cut short due to length limits. Ask a follow-up question if you'd like more detail on a specific part.)*"
-
     return {
-        "answer": answer,
-        "sources": [chunk[:200] + "..." for chunk in relevant_chunks],
+        "answer": response["message"]["content"],
+        "sources": [chunk[:200] + "..." for chunk in document_chunks],
+        "intent": intent,  # useful for debugging
     }
 
-# app/services/rag_service.py — add a streaming variant alongside answer_question
-def answer_question_stream(question: str, course_id: int):
-    """
-    Same retrieval logic as answer_question, but yields tokens as they're
-    generated instead of waiting for the full response. This doesn't make
-    Ollama generate faster — it changes WHEN the user sees output, which is
-    what actually matters for perceived speed.
-    """
-    question_embedding = get_single_embedding(question)
-    relevant_chunks = search_similar_chunks(course_id, question_embedding, n_results=3)
 
-    if not relevant_chunks:
-        yield "No course material has been indexed for this course yet."
+def answer_question_stream(question: str, course_id: int, student_id: int, db: Session):
+    """
+    Streaming version of the hybrid RAG pipeline.
+    Same logic as answer_question but yields tokens as they're generated.
+    """
+    intent = classify_intent(question)
+    lms_context = ""
+    document_chunks = []
+
+    if intent in ("lms", "hybrid"):
+        lms_context = build_lms_context(course_id, student_id, db)
+
+    if intent in ("document", "hybrid"):
+        question_embedding = get_single_embedding(question)
+        document_chunks = search_similar_chunks(course_id, question_embedding, n_results=3)
+
+    # Replace the existing no-data return in answer_question:
+    if not lms_context and not document_chunks:
+        yield ("I don't have enough information to answer that question. "
+            "This course may not have any uploaded materials or assignments yet.")
         return
 
-    relevant_chunks = [chunk[:1000] for chunk in relevant_chunks]
-    context = "\n\n---\n\n".join(relevant_chunks)
+    prompt_parts = [
+        "You are a helpful academic assistant for students in a Learning Management System.",
+        "Answer the student's question using ONLY the information provided below.",
+        "If the information needed is not present, say so clearly.",
+        "Be specific and direct.",
+        "",
+    ]
 
-    prompt = f"""You are a helpful academic assistant for students.
-Answer the student's question using ONLY the course material provided below.
-If the answer is not in the provided material, say "I couldn't find information about this in the course material."
-Give a complete, thorough answer.
+    if lms_context:
+        prompt_parts.append("=== COURSE & LMS INFORMATION ===")
+        prompt_parts.append(lms_context)
+        prompt_parts.append("")
 
-COURSE MATERIAL:
-{context}
+    if document_chunks:
+        prompt_parts.append("=== COURSE MATERIAL (from uploaded lectures) ===")
+        for i, chunk in enumerate(document_chunks, 1):
+            prompt_parts.append(f"[Excerpt {i}]: {chunk[:800]}")
+        prompt_parts.append("")
 
-STUDENT QUESTION:
-{question}
+    prompt_parts.append(f"STUDENT QUESTION: {question}")
+    prompt_parts.append("")
+    prompt_parts.append("ANSWER:")
 
-ANSWER:"""
+    prompt = "\n".join(prompt_parts)
 
     stream = ollama.chat(
         model=settings.OLLAMA_MODEL,
@@ -151,7 +213,7 @@ ANSWER:"""
         options={
             "num_predict": 800,
             "num_ctx": 3072,
-            "temperature": 0.3,
+            "temperature": 0.2,
             "num_thread": os.cpu_count(),
         },
     )
@@ -160,5 +222,6 @@ ANSWER:"""
         token = chunk["message"]["content"]
         if token:
             yield token
+
         if chunk.get("done") and chunk.get("done_reason") == "length":
-            yield "\n\n*(This answer was cut short due to length limits. Ask a follow-up question if you'd like more detail.)*"
+            yield "\n\n*(Response cut short — ask a more specific question for a complete answer.)*"
