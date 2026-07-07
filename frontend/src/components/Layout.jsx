@@ -1,31 +1,319 @@
 // src/components/Layout.jsx
+// Concept A — Executive Premium
+// Sidebar: full charcoal black, red SE logomark, white nav text
+// Mobile: sidebar hidden, hamburger top bar shown
+// Tablet: icon-only collapsed sidebar
+// Desktop: full sidebar with label text
+
+import { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import ChangePasswordModal from "./ChangePasswordModal";
+import { C, ROLE_COLORS, T } from "../theme";
+
+const NAV = {
+  admin: [
+    { to: "/admin",         icon: "ti-layout-dashboard", label: "Dashboard" },
+    { to: "/admin/users",   icon: "ti-users",            label: "Users"      },
+    { to: "/admin/courses", icon: "ti-books",            label: "Courses"    },
+  ],
+  teacher: [
+    { to: "/teacher", icon: "ti-layout-dashboard", label: "Dashboard" },
+  ],
+  student: [
+    { to: "/student", icon: "ti-layout-dashboard", label: "Dashboard" },
+  ],
+};
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [showPw, setShowPw]           = useState(false);
+  const [collapsed, setCollapsed]     = useState(false);
+  const [mobileOpen, setMobileOpen]   = useState(false);
+
+  const navItems = NAV[user?.role] || [];
+  const rc = ROLE_COLORS[user?.role] || ROLE_COLORS.student;
+  const initials = (user?.fullName || "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+
+  const AlphaLogo = ({ size = "md" }) => {
+    const s = size === "sm"
+      ? { wrap: { padding: "5px 8px", borderRadius: "5px" }, red: { fontSize: "11px", padding: "3px 6px", borderRadius: "3px" }, txt: { fontSize: "7px", paddingLeft: "6px" } }
+      : { wrap: { padding: "7px 10px", borderRadius: "6px" }, red: { fontSize: "13px", padding: "4px 7px", borderRadius: "4px" }, txt: { fontSize: "8px", paddingLeft: "7px" } };
+    return (
+      <div style={{ display: "inline-flex", background: "#111111", alignItems: "center", ...s.wrap }}>
+        <span style={{ background: C.accent, color: "#fff", fontWeight: "800", lineHeight: 1, letterSpacing: "0.01em", ...s.red }}>alpha</span>
+        <span style={{ color: "#fff", fontWeight: "700", lineHeight: "1.25", letterSpacing: "0.05em", textTransform: "uppercase", ...s.txt }}>ALPHA<br />EDUCATION<br />NETWORK</span>
+      </div>
+    );
+  };
+
+  const sidebarContent = (iconOnly = false) => (
+    <>
+      {/* Logo block */}
+      <div style={{ padding: iconOnly ? "16px 0 14px" : "20px 16px 18px", borderBottom: `1px solid ${C.sidebarBorder}`, display: "flex", flexDirection: "column", alignItems: iconOnly ? "center" : "flex-start", gap: "8px" }}>
+        {iconOnly ? (
+          <div style={{ width: "32px", height: "32px", background: C.accent, borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: "12px", fontWeight: "800", color: "#fff" }}>SE</span>
+          </div>
+        ) : (
+          <>
+            <AlphaLogo size="md" />
+            <span style={{ ...T.tiny, fontWeight: "600", color: C.sidebarMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>SmartEdu LMS</span>
+          </>
+        )}
+      </div>
+
+      {/* Nav items */}
+      <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: "2px" }}>
+        {navItems.map(({ to, icon, label }) => (
+          <NavLink key={to} to={to} end
+            onClick={() => setMobileOpen(false)}
+            style={({ isActive }) => ({
+              display: "flex", alignItems: "center",
+              gap: iconOnly ? 0 : "11px",
+              padding: iconOnly ? "11px" : "10px 12px",
+              borderRadius: "7px", textDecoration: "none",
+              ...T.navItem,
+              fontWeight: isActive ? "500" : "400",
+              color: isActive ? C.sidebarActive : C.sidebarText,
+              background: isActive ? C.sidebarActiveBg : "transparent",
+              justifyContent: iconOnly ? "center" : "flex-start",
+              transition: "background 0.12s, color 0.12s",
+            })}
+          >
+            <i className={`ti ${icon}`} style={{ fontSize: "18px", flexShrink: 0 }} />
+            {!iconOnly && <span>{label}</span>}
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* User + actions */}
+      <div style={{ borderTop: `1px solid ${C.sidebarBorder}`, padding: "12px 8px" }}>
+        {!iconOnly && (
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", borderRadius: "7px", background: "rgba(255,255,255,0.05)", marginBottom: "6px" }}>
+            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "#fff" }}>{initials}</span>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: "13px", fontWeight: "500", color: "#fff", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.fullName}</p>
+              <span style={{ ...T.tiny, fontWeight: "500", padding: "1px 6px", borderRadius: "20px", background: rc.bg, color: rc.text, textTransform: "capitalize" }}>{user?.role}</span>
+            </div>
+          </div>
+        )}
+        <SbBtn icon="ti-lock" label="Change password" iconOnly={iconOnly} onClick={() => setShowPw(true)} />
+        <SbBtn icon="ti-logout" label="Sign out" iconOnly={iconOnly} danger onClick={() => { logout(); navigate("/login", { replace: true }); }} />
+      </div>
+    </>
+  );
 
   return (
-    <div className="min-h-screen bg-[#F7F5F2]">
-      <nav className="bg-white border-b border-[#E8E4DC] px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-md bg-[#1F4E3D] text-white font-serif flex items-center justify-center text-sm">
-            S
+    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'Inter', system-ui, sans-serif", background: C.pageBg }}>
+
+      {/* ── Desktop sidebar (≥1024px) ───────────────────────────── */}
+      <aside className="desktop-sidebar" style={{
+        width: collapsed ? "64px" : "232px",
+        minHeight: "100vh",
+        background: C.sidebarBg,
+        display: "flex", flexDirection: "column",
+        transition: "width 0.18s ease",
+        flexShrink: 0,
+        position: "sticky", top: 0, maxHeight: "100vh", overflowY: "auto",
+      }}>
+        {/* Collapse toggle */}
+        <button onClick={() => setCollapsed(!collapsed)}
+          style={{ position: "absolute", top: "14px", right: collapsed ? "50%" : "12px", transform: collapsed ? "translateX(50%)" : "none", background: "none", border: "none", cursor: "pointer", color: C.sidebarMuted, fontSize: "16px", padding: "2px", display: "flex", alignItems: "center", zIndex: 10, transition: "right 0.18s, transform 0.18s" }}>
+          <i className={collapsed ? "ti ti-layout-sidebar-right" : "ti ti-layout-sidebar-left"} />
+        </button>
+        <div style={{ paddingTop: collapsed ? "0" : "0", display: "flex", flexDirection: "column", height: "100%" }}>
+          {sidebarContent(collapsed)}
+        </div>
+      </aside>
+
+      {/* ── Mobile top bar (<768px) ─────────────────────────────── */}
+      <div className="mobile-topbar" style={{ display: "none", background: C.sidebarBg, position: "sticky", top: 0, zIndex: 100, alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: `1px solid ${C.sidebarBorder}` }}>
+        <AlphaLogo size="sm" />
+        <button onClick={() => setMobileOpen(!mobileOpen)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.7)", fontSize: "22px", padding: "2px", display: "flex", alignItems: "center" }}>
+          <i className={mobileOpen ? "ti ti-x" : "ti ti-menu-2"} />
+        </button>
+      </div>
+
+      {/* ── Mobile drawer overlay ───────────────────────────────── */}
+      {mobileOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex" }}>
+          <div style={{ width: "240px", background: C.sidebarBg, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+            <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.sidebarBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <AlphaLogo size="sm" />
+              <button onClick={() => setMobileOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: C.sidebarMuted, fontSize: "20px", padding: "2px", display: "flex", alignItems: "center" }}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>{sidebarContent(false)}</div>
           </div>
-          <span className="font-serif text-lg text-[#1A1A1A]">SmartEdu</span>
+          <div style={{ flex: 1, background: "rgba(0,0,0,0.6)" }} onClick={() => setMobileOpen(false)} />
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-[#6B6B6B]">
-            {user?.fullName} <span className="text-[#A8A199]">· {user?.role}</span>
-          </span>
-          <button
-            onClick={logout}
-            className="text-sm text-[#9B3A30] hover:underline"
-          >
-            Sign out
-          </button>
+      )}
+
+      {/* ── Main content ────────────────────────────────────────── */}
+      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {children}
+      </main>
+
+      {showPw && <ChangePasswordModal onClose={() => setShowPw(false)} />}
+
+      <style>{`
+        * { box-sizing: border-box; }
+        @media (max-width: 767px) {
+          .desktop-sidebar { display: none !important; }
+          .mobile-topbar { display: flex !important; }
+        }
+        @media (min-width: 768px) and (max-width: 1023px) {
+          .desktop-sidebar { width: 64px !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function SbBtn({ icon, label, iconOnly, danger, onClick }) {
+  return (
+    <button onClick={onClick} title={label}
+      style={{ width: "100%", display: "flex", alignItems: "center", gap: iconOnly ? 0 : "10px", padding: "8px 12px", borderRadius: "6px", background: "none", border: "none", cursor: "pointer", color: danger ? "#F87171" : C.sidebarText, fontSize: "13px", fontFamily: "inherit", justifyContent: iconOnly ? "center" : "flex-start", marginBottom: "2px" }}>
+      <i className={`ti ${icon}`} style={{ fontSize: "17px" }} />
+      {!iconOnly && label}
+    </button>
+  );
+}
+
+// ── Shared page primitives ──────────────────────────────────────────────────
+
+export function PageShell({ title, subtitle, action, children }) {
+  return (
+    <div style={{ padding: "clamp(20px, 4vw, 40px) clamp(16px, 4vw, 40px)", maxWidth: "1200px", width: "100%" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "28px", gap: "16px", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ ...T.pageTitle, color: C.textPrimary, margin: 0 }}>{title}</h1>
+          {subtitle && <p style={{ ...T.pageSubtitle, color: C.textMuted, margin: "6px 0 0" }}>{subtitle}</p>}
         </div>
-      </nav>
-      <main className="px-6 py-8 max-w-5xl mx-auto">{children}</main>
+        {action && <div style={{ flexShrink: 0 }}>{action}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export function Card({ children, style = {} }) {
+  return (
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+export function CardHeader({ title, count, action }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ ...T.cardTitle, color: C.textPrimary }}>{title}</span>
+        {count !== undefined && (
+          <span style={{ ...T.tiny, fontWeight: "600", padding: "2px 8px", borderRadius: "20px", background: C.subtleBg, color: C.textMuted }}>{count}</span>
+        )}
+      </div>
+      {action && <div>{action}</div>}
+    </div>
+  );
+}
+
+export function Btn({ children, onClick, variant = "primary", size = "md", disabled, type = "button", style = {} }) {
+  const sizes = {
+    sm: { padding: "6px 12px",  borderRadius: "6px",  fontSize: "13px" },
+    md: { padding: "9px 16px",  borderRadius: "7px",  fontSize: "14px" },
+    lg: { padding: "11px 20px", borderRadius: "8px",  fontSize: "14px" },
+  };
+  const variants = {
+    primary:   { background: C.primary,    color: "#fff",           border: "none" },
+    accent:    { background: C.accent,     color: "#fff",           border: "none" },
+    secondary: { background: C.subtleBg,   color: C.textPrimary,   border: `1px solid ${C.border}` },
+    danger:    { background: C.dangerBg,   color: C.dangerText,    border: `1px solid ${C.dangerBorder}` },
+    ghost:     { background: "transparent",color: C.textSecondary, border: `1px solid ${C.border}` },
+  };
+  return (
+    <button type={type} onClick={onClick} disabled={disabled}
+      style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: "600", fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, letterSpacing: "0.01em", ...sizes[size], ...(variants[variant] || variants.primary), ...style }}>
+      {children}
+    </button>
+  );
+}
+
+export function Badge({ children, variant = "neutral" }) {
+  const v = {
+    neutral: { bg: C.subtleBg,    txt: C.textMuted,     border: C.border },
+    primary: { bg: "#F3F4F6",     txt: C.textPrimary,   border: C.border },
+    accent:  { bg: C.accentTint,  txt: C.accentText,    border: C.dangerBorder },
+    success: { bg: C.successBg,   txt: C.successText,   border: C.successBorder },
+    warning: { bg: C.warningBg,   txt: C.warningText,   border: C.warningBorder },
+    danger:  { bg: C.dangerBg,    txt: C.dangerText,    border: C.dangerBorder },
+    info:    { bg: C.infoBg,      txt: C.infoText,      border: C.infoBorder },
+  }[variant] || { bg: C.subtleBg, txt: C.textMuted, border: C.border };
+  return (
+    <span style={{ ...T.badge, padding: "3px 9px", borderRadius: "20px", whiteSpace: "nowrap", background: v.bg, color: v.txt, border: `1px solid ${v.border}` }}>
+      {children}
+    </span>
+  );
+}
+
+export function Alert({ children, variant = "error" }) {
+  if (!children) return null;
+  const v = {
+    error:   { bg: C.dangerBg,  txt: C.dangerText,  border: C.dangerBorder,  icon: "ti-alert-circle"   },
+    success: { bg: C.successBg, txt: C.successText, border: C.successBorder, icon: "ti-circle-check"   },
+    warning: { bg: C.warningBg, txt: C.warningText, border: C.warningBorder, icon: "ti-alert-triangle" },
+    info:    { bg: C.infoBg,    txt: C.infoText,    border: C.infoBorder,    icon: "ti-info-circle"    },
+  }[variant] || { bg: C.dangerBg, txt: C.dangerText, border: C.dangerBorder, icon: "ti-alert-circle" };
+  return (
+    <div style={{ ...T.bodyText, borderRadius: "7px", padding: "11px 14px", marginBottom: "16px", display: "flex", gap: "10px", alignItems: "flex-start", background: v.bg, color: v.txt, border: `1px solid ${v.border}` }}>
+      <i className={`ti ${v.icon}`} style={{ fontSize: "17px", flexShrink: 0, marginTop: "1px" }} />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+export function Input({ label, required, hint, ...props }) {
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      {label && (
+        <label style={{ display: "block", ...T.formLabel, color: C.textSecondary, marginBottom: "6px" }}>
+          {label}{required && <span style={{ color: C.accent, marginLeft: "3px" }}>*</span>}
+        </label>
+      )}
+      <input {...props}
+        style={{ width: "100%", background: C.inputBg, border: `1.5px solid transparent`, borderRadius: "7px", padding: "10px 13px", ...T.inputText, color: C.textPrimary, fontFamily: "inherit", outline: "none", ...props.style }}
+        onFocus={(e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; props.onFocus?.(e); }}
+        onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = C.inputBg; e.target.style.boxShadow = "none"; props.onBlur?.(e); }}
+      />
+      {hint && <p style={{ ...T.caption, color: C.textMuted, margin: "4px 0 0" }}>{hint}</p>}
+    </div>
+  );
+}
+
+export function Select({ label, required, children, hint, ...props }) {
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      {label && (
+        <label style={{ display: "block", ...T.formLabel, color: C.textSecondary, marginBottom: "6px" }}>
+          {label}{required && <span style={{ color: C.accent, marginLeft: "3px" }}>*</span>}
+        </label>
+      )}
+      <div style={{ position: "relative" }}>
+        <select {...props}
+          style={{ width: "100%", appearance: "none", background: C.inputBg, border: `1.5px solid transparent`, borderRadius: "7px", padding: "10px 36px 10px 13px", ...T.inputText, color: C.textPrimary, fontFamily: "inherit", outline: "none", ...props.style }}>
+          {children}
+        </select>
+        <div style={{ position: "absolute", right: "11px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: C.textMuted, fontSize: "15px" }}>
+          <i className="ti ti-chevron-down" />
+        </div>
+      </div>
+      {hint && <p style={{ ...T.caption, color: C.textMuted, margin: "4px 0 0" }}>{hint}</p>}
     </div>
   );
 }

@@ -2,7 +2,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import Layout from "../components/Layout";
+import CourseTabs from "../components/CourseTabs";
 import StatusBadge from "../components/StatusBadge";
+import AssignmentsPanel from "../components/teacher/AssignmentsPanel";
 import * as documentsApi from "../api/documents";
 import * as coursesApi from "../api/courses";
 
@@ -11,8 +13,8 @@ export default function TeacherCourseDetail() {
   const [course, setCourse] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [roster, setRoster] = useState([]);
+  const [activeTab, setActiveTab] = useState("materials");
   const [uploading, setUploading] = useState(false);
-  const [enrollEmail, setEnrollEmail] = useState("");
   const [error, setError] = useState("");
   const pollRef = useRef(null);
 
@@ -33,9 +35,6 @@ export default function TeacherCourseDetail() {
     loadRoster();
   }, [courseId, loadDocuments, loadRoster]);
 
-  // THE FIX for "frontend doesn't update after upload": poll the
-  // documents list every 3 seconds WHILE anything is still "processing".
-  // Stops automatically once nothing is pending, so we're not polling forever.
   useEffect(() => {
     const hasPending = documents.some((d) => d.status === "processing");
 
@@ -61,24 +60,20 @@ export default function TeacherCourseDetail() {
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     if (!file.name.endsWith(".pdf")) {
       setError("Only PDF files are accepted.");
       return;
     }
-
     setError("");
     setUploading(true);
     try {
       await documentsApi.uploadDocument(courseId, file);
-      // Immediately refetch so the new "processing" row appears right away,
-      // rather than waiting for the next poll tick
       await loadDocuments();
     } catch (err) {
       setError(err.response?.data?.detail || "Upload failed.");
     } finally {
       setUploading(false);
-      e.target.value = ""; // allow re-selecting the same file later
+      e.target.value = "";
     }
   };
 
@@ -92,24 +87,19 @@ export default function TeacherCourseDetail() {
     }
   };
 
-  const handleEnroll = async (e) => {
-    e.preventDefault();
-    setError("");
+  const handleView = async (docId) => {
     try {
-      await coursesApi.enrollStudent(courseId, enrollEmail);
-      setEnrollEmail("");
-      await loadRoster();
-    } catch (err) {
-      setError(err.response?.data?.detail || "Couldn't enroll that student.");
+      await documentsApi.viewDocument(courseId, docId);
+    } catch {
+      setError("Couldn't open this document.");
     }
   };
 
-  const handleRemoveStudent = async (studentId) => {
+  const handleDownload = async (docId, filename) => {
     try {
-      await coursesApi.removeStudent(courseId, studentId);
-      await loadRoster();
+      await documentsApi.downloadDocument(courseId, docId, filename);
     } catch {
-      setError("Couldn't remove that student.");
+      setError("Couldn't download this document.");
     }
   };
 
@@ -117,8 +107,13 @@ export default function TeacherCourseDetail() {
 
   return (
     <Layout>
-      <p className="text-xs font-medium text-[#A8A199] mb-1">{course.code}</p>
-      <h1 className="text-2xl font-serif text-[#1A1A1A] mb-6">{course.name}</h1>
+      <div className="bg-white rounded-xl border border-[#E8E4DC] p-5 mb-6">
+        <p className="text-xs font-medium text-[#A8A199] mb-1">{course.code}</p>
+        <h1 className="text-2xl font-serif text-[#1A1A1A] mb-1">{course.name}</h1>
+        {course.description && (
+          <p className="text-sm text-[#6B6B6B]">{course.description}</p>
+        )}
+      </div>
 
       {error && (
         <div className="bg-[#FBEAE8] text-[#9B3A30] text-sm rounded-lg px-3 py-2 mb-4">
@@ -126,14 +121,28 @@ export default function TeacherCourseDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Documents panel */}
+      <CourseTabs
+        tabs={[
+          { id: "materials", label: "Lecture Materials" },
+          { id: "assignments", label: "Assignments" },
+        ]}
+        active={activeTab}
+        onChange={setActiveTab}
+      />
+
+      {activeTab === "materials" && (
         <div className="bg-white rounded-xl border border-[#E8E4DC] p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-serif text-lg text-[#1A1A1A]">Course material</h2>
             <label className="text-sm font-medium text-white bg-[#1F4E3D] hover:bg-[#173B2E] px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
               {uploading ? "Uploading…" : "Upload PDF"}
-              <input type="file" accept=".pdf" onChange={handleUpload} disabled={uploading} className="hidden" />
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={handleUpload}
+                disabled={uploading}
+                className="hidden"
+              />
             </label>
           </div>
 
@@ -142,21 +151,42 @@ export default function TeacherCourseDetail() {
           ) : (
             <ul className="space-y-2">
               {documents.map((doc) => (
-                <li key={doc.id} className="flex items-center justify-between border border-[#EFEBE3] rounded-lg px-3 py-2">
-                  <div className="min-w-0 flex-1">
+                <li
+                  key={doc.id}
+                  className="flex items-center justify-between border border-[#EFEBE3] rounded-lg px-3 py-2.5"
+                >
+                  <div className="flex-1 min-w-0">
                     <p className="text-sm text-[#1A1A1A] truncate">{doc.filename}</p>
-                    {doc.status === "indexed" && (
-                      <p className="text-xs text-[#A8A199]">{doc.chunk_count} chunks indexed</p>
-                    )}
-                    {doc.status === "failed" && (
-                      <p className="text-xs text-[#9B3A30]">{doc.error_message}</p>
-                    )}
+                    <p className="text-xs text-[#A8A199] mt-0.5">
+                      {doc.status === "indexed"
+                        ? `${doc.chunk_count} chunks indexed`
+                        : doc.status === "processing"
+                        ? "Processing…"
+                        : doc.error_message || "Failed"}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3 ml-3">
+
+                  <div className="flex items-center gap-3 shrink-0 ml-3">
+                    {doc.status === "indexed" && (
+                      <>
+                        <button
+                          onClick={() => handleView(doc.id)}
+                          className="text-xs text-[#6C72E0] hover:underline"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleDownload(doc.id, doc.filename)}
+                          className="text-xs text-[#6C72E0] hover:underline"
+                        >
+                          Download
+                        </button>
+                      </>
+                    )}
                     <StatusBadge status={doc.status} />
                     <button
                       onClick={() => handleDelete(doc.id)}
-                      className="text-xs text-[#9B3A30] hover:underline"
+                      className="text-xs text-[#C0392B] hover:underline"
                     >
                       Delete
                     </button>
@@ -166,31 +196,29 @@ export default function TeacherCourseDetail() {
             </ul>
           )}
         </div>
+      )}
 
-       {/* Roster panel (READ ONLY for teacher) */}
-<div className="bg-white rounded-xl border border-[#E8E4DC] p-5">
-  <h2 className="font-serif text-lg text-[#1A1A1A] mb-4">
-    Enrolled students
-  </h2>
+      {activeTab === "assignments" && <AssignmentsPanel courseId={courseId} />}
 
-  {roster.length === 0 ? (
-    <p className="text-sm text-[#6B6B6B]">
-      No students enrolled yet. Contact an admin to enroll students.
-    </p>
-  ) : (
-    <ul className="space-y-2">
-      {roster.map((student) => (
-        <li
-          key={student.id}
-          className="border border-[#EFEBE3] rounded-lg px-3 py-2"
-        >
-          <p className="text-sm text-[#1A1A1A]">{student.full_name}</p>
-          <p className="text-xs text-[#A8A199]">{student.email}</p>
-        </li>
-      ))}
-    </ul>
-  )}
-</div>
+      <div className="bg-white rounded-xl border border-[#E8E4DC] p-5 mt-6">
+        <h2 className="font-serif text-lg text-[#1A1A1A] mb-4">Enrolled students</h2>
+        {roster.length === 0 ? (
+          <p className="text-sm text-[#6B6B6B]">
+            No students enrolled yet. Contact an admin to enroll students.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {roster.map((student) => (
+              <li
+                key={student.id}
+                className="border border-[#EFEBE3] rounded-lg px-3 py-2"
+              >
+                <p className="text-sm text-[#1A1A1A]">{student.full_name}</p>
+                <p className="text-xs text-[#A8A199]">{student.email}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </Layout>
   );

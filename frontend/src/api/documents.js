@@ -15,59 +15,28 @@ export const listDocuments = (courseId) =>
 export const deleteDocument = (courseId, documentId) =>
   client.delete(`/documents/${courseId}/${documentId}`);
 
-export const viewDocument = async (courseId, documentId) => {
-  try {
-    const response = await client.get(
-      `/documents/${courseId}/${documentId}/download`,
-      {
-        responseType: "blob",
-      }
-    );
 
-    const blobUrl = window.URL.createObjectURL(
-      new Blob([response.data], { type: "application/pdf" })
-    );
-
-    window.open(blobUrl, "_blank");
-  } catch (err) {
-    alert(
-      err.response?.status === 404
-        ? "File not found."
-        : "Couldn't open this file."
-    );
-  }
+// Add these to src/api/documents.js alongside existing functions
+export const viewDocument = async (courseId, docId) => {
+  const response = await client.get(
+    `/documents/${courseId}/${docId}/download`,
+    { responseType: "blob" }
+  );
+  const url = URL.createObjectURL(response.data);
+  window.open(url, "_blank");
 };
 
-export const downloadDocument = async (
-  courseId,
-  documentId,
-  filename
-) => {
-  try {
-    const response = await client.get(
-      `/documents/${courseId}/${documentId}/download`,
-      {
-        responseType: "blob",
-      }
-    );
-
-    const url = window.URL.createObjectURL(
-      new Blob([response.data])
-    );
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    window.URL.revokeObjectURL(url);
-  } catch (err) {
-    alert(
-      err.response?.status === 404
-        ? "File not found."
-        : "Couldn't download this file."
-    );
-  }
+export const downloadDocument = async (courseId, docId, filename) => {
+  const response = await client.get(
+    `/documents/${courseId}/${docId}/download`,
+    { responseType: "blob" }
+  );
+  const url = URL.createObjectURL(response.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "document.pdf";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 };

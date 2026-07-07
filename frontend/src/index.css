@@ -1,3 +1,26 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Justified long-form text — used for assignment descriptions, AI
+   feedback, teacher comments, and similar prose blocks throughout the
+   app. text-justify: inter-word + hyphens helps reduce the uneven
+   word-gap spacing that plain CSS justify produces, especially in
+   narrow containers like cards. */
+.prose-justify {
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+
+/* Preserves exact whitespace, line breaks, and blank-line paragraph
+   spacing from plain-text input — e.g. assignment descriptions typed
+   into a textarea. pre-wrap keeps long lines wrapping responsively
+   (unlike plain `pre`, which would force horizontal scrolling). */
+.preserve-format {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}

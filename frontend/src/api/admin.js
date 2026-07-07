@@ -15,6 +15,10 @@ export const unassignTeacher = (courseId, teacherId) =>
   client.delete(`/admin/courses/${courseId}/assign-teacher/${teacherId}`);
 
 export const enrollStudent = (courseId, studentEmail) =>
-  client.post(`/admin/courses/${courseId}/enroll`, { student_email: studentEmail });
+  client.post(`/admin/courses/${courseId}/enroll`, { student_identifier: studentEmail });
+
 export const unenrollStudent = (courseId, studentId) =>
   client.delete(`/admin/courses/${courseId}/enroll/${studentId}`);
+
+export const deleteUser = (userId) => client.delete(`/admin/users/${userId}`);
+export const resendSetupEmail = (userId) => client.post(`/admin/users/${userId}/resend-setup-email`);

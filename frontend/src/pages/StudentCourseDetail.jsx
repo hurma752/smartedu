@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import CourseTabs from "../components/CourseTabs";
+import AssignmentsPanel from "../components/student/AssignmentsPanel";
 import * as coursesApi from "../api/courses";
 import * as documentsApi from "../api/documents";
 import * as chatApi from "../api/chat";
@@ -31,51 +32,56 @@ export default function StudentCourseDetail() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-const handleSend = async () => {
-  if (!input.trim() || loading) return;
-  const question = input.trim();
-  setInput("");
-  setMessages((prev) => [...prev, { role: "user", content: question }]);
-  setLoading(true);
+  const handleSend = async () => {
+    if (!input.trim() || loading) return;
+    const question = input.trim();
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: question }]);
+    setLoading(true);
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
-  // Add an empty assistant message that we'll fill in as tokens arrive
-  setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-  try {
-    await chatApi.sendMessageStream(courseId, question, (partialText) => {
+    try {
+      await chatApi.sendMessageStream(courseId, question, (partialText) => {
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: "assistant", content: partialText };
+          return updated;
+        });
+      });
+    } catch (err) {
       setMessages((prev) => {
         const updated = [...prev];
-        updated[updated.length - 1] = { role: "assistant", content: partialText };
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: err.response?.status === 403 ? "You don't have access to this course's material." : "Something went wrong.",
+          isError: true,
+        };
         return updated;
       });
-    });
-  } catch (err) {
-    setMessages((prev) => {
-      const updated = [...prev];
-      updated[updated.length - 1] = {
-        role: "assistant",
-        content: err.response?.status === 403 ? "You don't have access to this course's material." : "Something went wrong.",
-        isError: true,
-      };
-      return updated;
-    });
-  } finally {
-    setLoading(false);
-  }
-};
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (!course) return <Layout><p className="text-sm text-[#6B6B6B]">Loading…</p></Layout>;
 
   return (
     <Layout>
-      {/* Course Info — always visible, not behind a tab */}
       <div className="bg-white rounded-xl border border-[#E8E4DC] p-5 mb-6">
         <p className="text-xs font-medium text-[#A8A199] mb-1">{course.code}</p>
         <h1 className="text-2xl font-serif text-[#1A1A1A] mb-1">{course.name}</h1>
         {course.description && <p className="text-sm text-[#6B6B6B]">{course.description}</p>}
       </div>
 
-      <CourseTabs active={activeTab} onChange={setActiveTab} />
+      <CourseTabs
+  tabs={[
+    { id: "materials", label: "Lecture Materials" },
+    { id: "assignments", label: "Assignments" },
+    { id: "chatbot", label: "AI Assistant" },
+  ]}
+  active={activeTab}
+  onChange={setActiveTab}
+/>
 
       {activeTab === "materials" && (
         <div className="bg-white rounded-xl border border-[#E8E4DC] p-5">
@@ -92,32 +98,27 @@ const handleSend = async () => {
                     </p>
                   </div>
                   <div className="flex gap-3">
-  <button
-    onClick={() => documentsApi.viewDocument(courseId, doc.id)}
-    className="text-sm text-[#1F4E3D] font-medium hover:underline"
-  >
-    View
-  </button>
-
-  <button
-    onClick={() =>
-      documentsApi.downloadDocument(
-        courseId,
-        doc.id,
-        doc.filename
-      )
-    }
-    className="text-sm text-[#1F4E3D] font-medium hover:underline"
-  >
-    Download
-  </button>
-</div>
+                    <button
+                      onClick={() => documentsApi.viewDocument(courseId, doc.id)}
+                      className="text-sm text-[#1F4E3D] font-medium hover:underline"
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => documentsApi.downloadDocument(courseId, doc.id, doc.filename)}
+                      className="text-sm text-[#1F4E3D] font-medium hover:underline"
+                    >
+                      Download
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </div>
       )}
+
+      {activeTab === "assignments" && <AssignmentsPanel courseId={courseId} />}
 
       {activeTab === "chatbot" && (
         <div className="bg-white rounded-xl border border-[#E8E4DC] flex flex-col h-[55vh]">
@@ -129,7 +130,7 @@ const handleSend = async () => {
                   : msg.isError ? "bg-[#FBEAE8] text-[#9B3A30] rounded-bl-sm"
                   : "bg-[#F1EEE7] text-[#1A1A1A] rounded-bl-sm"
                 }`}>
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                  <p className="whitespace-pre-wrap leading-relaxed prose-justify">{msg.content}</p>
                   {msg.sources?.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-black/10">
                       <p className="text-xs opacity-60 font-medium mb-1">Sources</p>

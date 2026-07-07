@@ -12,6 +12,9 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminCourses from "./pages/admin/AdminCourses";
 import AdminCourseDetail from "./pages/admin/AdminCourseDetail";
+import TeacherSubmissions from "./pages/TeacherSubmissions";
+import ForgotPassword from "./pages/ForgotPassword";
+import SetPassword from "./pages/SetPassword";
 
 const HOME_BY_ROLE = { admin: "/admin", teacher: "/teacher", student: "/student" };
 
@@ -30,13 +33,17 @@ function AppRoutes() {
 <Route path="/admin/users" element={<ProtectedRoute requiredRole="admin"><AdminUsers /></ProtectedRoute>} />
 <Route path="/admin/courses" element={<ProtectedRoute requiredRole="admin"><AdminCourses /></ProtectedRoute>} />
 <Route path="/admin/courses/:courseId" element={<ProtectedRoute requiredRole="admin"><AdminCourseDetail /></ProtectedRoute>} />
-
+<Route path="/forgot-password" element={<ForgotPassword />} />
+<Route path="/set-password" element={<SetPassword />} />
+<Route path="/reset-password" element={<SetPassword />} />
       <Route path="/teacher" element={<ProtectedRoute requiredRole="teacher"><TeacherDashboard /></ProtectedRoute>} />
       <Route path="/teacher/courses/:courseId" element={<ProtectedRoute requiredRole="teacher"><TeacherCourseDetail /></ProtectedRoute>} />
 
       <Route path="/student" element={<ProtectedRoute requiredRole="student"><StudentDashboard /></ProtectedRoute>} />
       <Route path="/student/courses/:courseId" element={<ProtectedRoute requiredRole="student"><StudentCourseDetail /></ProtectedRoute>} />
-
+<Route path="/teacher/assignments/:assignmentId/submissions" element={
+  <ProtectedRoute requiredRole="teacher"><TeacherSubmissions /></ProtectedRoute>
+} />
       <Route path="/" element={<HomeRedirect />} />
     </Routes>
   );

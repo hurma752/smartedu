@@ -1,13 +1,15 @@
 // src/components/CourseTabs.jsx
 const TABS = [
   { id: "materials", label: "Lecture Materials" },
+  { id: "assignments", label: "Assignments" },
   { id: "chatbot", label: "AI Assistant" },
 ];
 
-export default function CourseTabs({ active, onChange }) {
+// src/components/CourseTabs.jsx
+export default function CourseTabs({ tabs, active, onChange }) {
   return (
     <div className="flex gap-1 border-b border-[#E8E4DC] mb-6">
-      {TABS.map((tab) => (
+      {tabs.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
