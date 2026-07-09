@@ -6,7 +6,7 @@
 // Desktop: full sidebar with label text
 
 import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useParams, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import ChangePasswordModal from "./ChangePasswordModal";
 import { C, ROLE_COLORS, T } from "../theme";
@@ -17,20 +17,42 @@ const NAV = {
     { to: "/admin/users",   icon: "ti-users",            label: "Users"      },
     { to: "/admin/courses", icon: "ti-books",            label: "Courses"    },
   ],
-  teacher: [
-    { to: "/teacher", icon: "ti-layout-dashboard", label: "Dashboard" },
-  ],
   student: [
     { to: "/student", icon: "ti-layout-dashboard", label: "Dashboard" },
   ],
 };
 
+// Teacher course sub-nav tabs — mirrors TeacherCourseDetail TABS
+const TEACHER_COURSE_TABS = [
+  { tab: "materials",   icon: "ti-file-text",       label: "Lectures"    },
+  { tab: "assignments", icon: "ti-clipboard-list",   label: "Assignments" },
+  { tab: "students",    icon: "ti-users",             label: "Students"    },
+];
+
+// Student course sub-nav tabs — mirrors StudentCourseDetail tabs
+const STUDENT_COURSE_TABS = [
+  { tab: "materials",   icon: "ti-file-text",       label: "Lectures"    },
+  { tab: "assignments", icon: "ti-clipboard-list",   label: "Assignments" },
+  { tab: "chatbot",     icon: "ti-message-chatbot",  label: "AI Assistant" },
+];
+
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  const params    = useParams();
   const [showPw, setShowPw]           = useState(false);
   const [collapsed, setCollapsed]     = useState(false);
   const [mobileOpen, setMobileOpen]   = useState(false);
+
+  // Detect whether we're on a teacher course detail page
+  const teacherCourseId = user?.role === "teacher" ? params.courseId : null;
+  // Detect whether we're on a student course detail page
+  const studentCourseId = user?.role === "student"  ? params.courseId : null;
+
+  // Active tab from URL search param
+  const searchParams  = new URLSearchParams(location.search);
+  const activeTab     = searchParams.get("tab") || "materials";
 
   const navItems = NAV[user?.role] || [];
   const rc = ROLE_COLORS[user?.role] || ROLE_COLORS.student;
@@ -66,26 +88,194 @@ export default function Layout({ children }) {
 
       {/* Nav items */}
       <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: "2px" }}>
-        {navItems.map(({ to, icon, label }) => (
-          <NavLink key={to} to={to} end
-            onClick={() => setMobileOpen(false)}
-            style={({ isActive }) => ({
-              display: "flex", alignItems: "center",
-              gap: iconOnly ? 0 : "11px",
-              padding: iconOnly ? "11px" : "10px 12px",
-              borderRadius: "7px", textDecoration: "none",
-              ...T.navItem,
-              fontWeight: isActive ? "500" : "400",
-              color: isActive ? C.sidebarActive : C.sidebarText,
-              background: isActive ? C.sidebarActiveBg : "transparent",
-              justifyContent: iconOnly ? "center" : "flex-start",
-              transition: "background 0.12s, color 0.12s",
+
+        {/* ── Teacher contextual nav ── */}
+        {user?.role === "teacher" ? (
+          <>
+            {/* Dashboard always visible */}
+            <NavLink to="/teacher" end onClick={() => setMobileOpen(false)}
+              style={({ isActive }) => ({
+                display: "flex", alignItems: "center",
+                gap: iconOnly ? 0 : "11px",
+                padding: iconOnly ? "11px" : "10px 12px",
+                borderRadius: "7px", textDecoration: "none",
+                ...T.navItem,
+                fontWeight: isActive ? "500" : "400",
+                color: isActive ? C.sidebarActive : C.sidebarText,
+                background: isActive ? C.sidebarActiveBg : "transparent",
+                justifyContent: iconOnly ? "center" : "flex-start",
+                transition: "background 0.12s, color 0.12s",
+              })}
+            >
+              <i className="ti ti-layout-dashboard" style={{ fontSize: "18px", flexShrink: 0 }} />
+              {!iconOnly && <span>Dashboard</span>}
+            </NavLink>
+
+            {/* Course sub-nav — only when on a course detail page */}
+            {teacherCourseId && !iconOnly && (
+              <>
+                {/* Course context label */}
+                <div style={{ padding: "10px 12px 4px", marginTop: "6px" }}>
+                  <p style={{ fontSize: "10px", fontWeight: "700", color: C.sidebarMuted, letterSpacing: "0.09em", textTransform: "uppercase", margin: 0 }}>
+                    Current course
+                  </p>
+                </div>
+
+                {/* Course sub-nav items */}
+                {TEACHER_COURSE_TABS.map(({ tab, icon, label }) => {
+                  const isActive = activeTab === tab;
+                  return (
+                    <button key={tab}
+                      onClick={() => {
+                        navigate(`/teacher/courses/${teacherCourseId}?tab=${tab}`);
+                        setMobileOpen(false);
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "11px",
+                        padding: "10px 12px", borderRadius: "7px",
+                        background: isActive ? C.sidebarActiveBg : "transparent",
+                        border: isActive ? `none` : "none",
+                        borderLeft: isActive ? `3px solid ${C.accent}` : "3px solid transparent",
+                        cursor: "pointer", fontFamily: "inherit",
+                        ...T.navItem,
+                        fontWeight: isActive ? "500" : "400",
+                        color: isActive ? C.sidebarActive : C.sidebarText,
+                        textAlign: "left", transition: "background 0.12s, color 0.12s",
+                      }}
+                    >
+                      <i className={`ti ${icon}`} style={{ fontSize: "17px", flexShrink: 0 }} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+
+                {/* Switch course link */}
+                <button
+                  onClick={() => { navigate("/teacher"); setMobileOpen(false); }}
+                  style={{ display: "flex", alignItems: "center", gap: "9px", padding: "8px 12px", marginTop: "6px", borderRadius: "7px", background: "transparent", border: `1px dashed ${C.sidebarBorder}`, cursor: "pointer", fontFamily: "inherit", color: C.sidebarMuted, fontSize: "12px", transition: "border-color 0.12s" }}
+                >
+                  <i className="ti ti-switch-horizontal" style={{ fontSize: "14px" }} />
+                  <span>Switch course</span>
+                </button>
+              </>
+            )}
+
+            {/* Icon-only: show course sub-nav icons when on a course page */}
+            {teacherCourseId && iconOnly && TEACHER_COURSE_TABS.map(({ tab, icon }) => {
+              const isActive = activeTab === tab;
+              return (
+                <button key={tab}
+                  onClick={() => navigate(`/teacher/courses/${teacherCourseId}?tab=${tab}`)}
+                  title={tab}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "11px", borderRadius: "7px", background: isActive ? C.sidebarActiveBg : "transparent", border: "none", cursor: "pointer", color: isActive ? C.sidebarActive : C.sidebarText, transition: "background 0.12s" }}
+                >
+                  <i className={`ti ${icon}`} style={{ fontSize: "18px" }} />
+                </button>
+              );
             })}
-          >
-            <i className={`ti ${icon}`} style={{ fontSize: "18px", flexShrink: 0 }} />
-            {!iconOnly && <span>{label}</span>}
-          </NavLink>
-        ))}
+          </>
+        ) : user?.role === "student" ? (
+          /* ── Student contextual nav ── */
+          <>
+            {/* Dashboard always visible */}
+            <NavLink to="/student" end onClick={() => setMobileOpen(false)}
+              style={({ isActive }) => ({
+                display: "flex", alignItems: "center",
+                gap: iconOnly ? 0 : "11px",
+                padding: iconOnly ? "11px" : "10px 12px",
+                borderRadius: "7px", textDecoration: "none",
+                ...T.navItem,
+                fontWeight: isActive ? "500" : "400",
+                color: isActive ? C.sidebarActive : C.sidebarText,
+                background: isActive ? C.sidebarActiveBg : "transparent",
+                justifyContent: iconOnly ? "center" : "flex-start",
+                transition: "background 0.12s, color 0.12s",
+              })}
+            >
+              <i className="ti ti-layout-dashboard" style={{ fontSize: "18px", flexShrink: 0 }} />
+              {!iconOnly && <span>Dashboard</span>}
+            </NavLink>
+
+            {/* Course sub-nav — only when on a course detail page */}
+            {studentCourseId && !iconOnly && (
+              <>
+                <div style={{ padding: "10px 12px 4px", marginTop: "6px" }}>
+                  <p style={{ fontSize: "10px", fontWeight: "700", color: C.sidebarMuted, letterSpacing: "0.09em", textTransform: "uppercase", margin: 0 }}>
+                    Current course
+                  </p>
+                </div>
+
+                {STUDENT_COURSE_TABS.map(({ tab, icon, label }) => {
+                  const isActive = activeTab === tab;
+                  return (
+                    <button key={tab}
+                      onClick={() => { navigate(`/student/courses/${studentCourseId}?tab=${tab}`); setMobileOpen(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "11px",
+                        padding: "10px 12px", borderRadius: "7px",
+                        background: isActive ? C.sidebarActiveBg : "transparent",
+                        border: "none",
+                        borderLeft: isActive ? `3px solid ${C.accent}` : "3px solid transparent",
+                        cursor: "pointer", fontFamily: "inherit",
+                        ...T.navItem,
+                        fontWeight: isActive ? "500" : "400",
+                        color: isActive ? C.sidebarActive : C.sidebarText,
+                        textAlign: "left", transition: "background 0.12s, color 0.12s",
+                      }}
+                    >
+                      <i className={`ti ${icon}`} style={{ fontSize: "17px", flexShrink: 0 }} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => { navigate("/student"); setMobileOpen(false); }}
+                  style={{ display: "flex", alignItems: "center", gap: "9px", padding: "8px 12px", marginTop: "6px", borderRadius: "7px", background: "transparent", border: `1px dashed ${C.sidebarBorder}`, cursor: "pointer", fontFamily: "inherit", color: C.sidebarMuted, fontSize: "12px" }}
+                >
+                  <i className="ti ti-switch-horizontal" style={{ fontSize: "14px" }} />
+                  <span>Switch course</span>
+                </button>
+              </>
+            )}
+
+            {/* Icon-only student course sub-nav */}
+            {studentCourseId && iconOnly && STUDENT_COURSE_TABS.map(({ tab, icon }) => {
+              const isActive = activeTab === tab;
+              return (
+                <button key={tab}
+                  onClick={() => navigate(`/student/courses/${studentCourseId}?tab=${tab}`)}
+                  title={tab}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "11px", borderRadius: "7px", background: isActive ? C.sidebarActiveBg : "transparent", border: "none", cursor: "pointer", color: isActive ? C.sidebarActive : C.sidebarText }}
+                >
+                  <i className={`ti ${icon}`} style={{ fontSize: "18px" }} />
+                </button>
+              );
+            })}
+          </>
+        ) : (
+          /* ── Admin nav ── */
+          navItems.map(({ to, icon, label }) => (
+            <NavLink key={to} to={to} end
+              onClick={() => setMobileOpen(false)}
+              style={({ isActive }) => ({
+                display: "flex", alignItems: "center",
+                gap: iconOnly ? 0 : "11px",
+                padding: iconOnly ? "11px" : "10px 12px",
+                borderRadius: "7px", textDecoration: "none",
+                ...T.navItem,
+                fontWeight: isActive ? "500" : "400",
+                color: isActive ? C.sidebarActive : C.sidebarText,
+                background: isActive ? C.sidebarActiveBg : "transparent",
+                justifyContent: iconOnly ? "center" : "flex-start",
+                transition: "background 0.12s, color 0.12s",
+              })}
+            >
+              <i className={`ti ${icon}`} style={{ fontSize: "18px", flexShrink: 0 }} />
+              {!iconOnly && <span>{label}</span>}
+            </NavLink>
+          ))
+        )}
       </nav>
 
       {/* User + actions */}

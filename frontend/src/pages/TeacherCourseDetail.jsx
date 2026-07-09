@@ -1,21 +1,27 @@
 // src/pages/TeacherCourseDetail.jsx
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams } from "react-router-dom";
-import Layout from "../components/Layout";
-import CourseTabs from "../components/CourseTabs";
-import StatusBadge from "../components/StatusBadge";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import Layout, { PageShell, Card, CardHeader, Btn, Alert } from "../components/Layout";
 import AssignmentsPanel from "../components/teacher/AssignmentsPanel";
 import * as documentsApi from "../api/documents";
 import * as coursesApi from "../api/courses";
+import { getErrorMessage } from "../utils/errorMessage";
+import { C, T } from "../theme";
 
 export default function TeacherCourseDetail() {
-  const { courseId } = useParams();
-  const [course, setCourse] = useState(null);
+  const { courseId }  = useParams();
+  const navigate      = useNavigate();
+  const location      = useLocation();
+
+  // Active tab driven by URL ?tab= param — sidebar nav sets this
+  const searchParams = new URLSearchParams(location.search);
+  const activeTab    = searchParams.get("tab") || "materials";
+
+  const [course,    setCourse]    = useState(null);
   const [documents, setDocuments] = useState([]);
-  const [roster, setRoster] = useState([]);
-  const [activeTab, setActiveTab] = useState("materials");
+  const [roster,    setRoster]    = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState("");
+  const [error,     setError]     = useState("");
   const pollRef = useRef(null);
 
   const loadDocuments = useCallback(async () => {
@@ -35,42 +41,32 @@ export default function TeacherCourseDetail() {
     loadRoster();
   }, [courseId, loadDocuments, loadRoster]);
 
+  // Poll while any doc is processing
   useEffect(() => {
     const hasPending = documents.some((d) => d.status === "processing");
-
     if (hasPending && !pollRef.current) {
       pollRef.current = setInterval(async () => {
         const updated = await loadDocuments();
-        const stillPending = updated.some((d) => d.status === "processing");
-        if (!stillPending) {
+        if (!updated.some((d) => d.status === "processing")) {
           clearInterval(pollRef.current);
           pollRef.current = null;
         }
       }, 3000);
     }
-
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [documents, loadDocuments]);
 
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (!file.name.endsWith(".pdf")) {
-      setError("Only PDF files are accepted.");
-      return;
-    }
+    if (!file.name.endsWith(".pdf")) { setError("Only PDF files are accepted."); return; }
     setError("");
     setUploading(true);
     try {
       await documentsApi.uploadDocument(courseId, file);
       await loadDocuments();
     } catch (err) {
-      setError(err.response?.data?.detail || "Upload failed.");
+      setError(getErrorMessage(err, "Upload failed."));
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -88,138 +84,152 @@ export default function TeacherCourseDetail() {
   };
 
   const handleView = async (docId) => {
-    try {
-      await documentsApi.viewDocument(courseId, docId);
-    } catch {
-      setError("Couldn't open this document.");
-    }
+    try { await documentsApi.viewDocument(courseId, docId); }
+    catch { setError("Couldn't open this document."); }
   };
 
   const handleDownload = async (docId, filename) => {
-    try {
-      await documentsApi.downloadDocument(courseId, docId, filename);
-    } catch {
-      setError("Couldn't download this document.");
-    }
+    try { await documentsApi.downloadDocument(courseId, docId, filename); }
+    catch { setError("Couldn't download this document."); }
   };
 
-  if (!course) return <Layout><p className="text-sm text-[#6B6B6B]">Loading…</p></Layout>;
+  if (!course) return (
+    <Layout>
+      <PageShell title="Loading…">
+        <p style={{ color: C.textMuted, fontSize: "14px" }}>Fetching course details…</p>
+      </PageShell>
+    </Layout>
+  );
+
+  // Tab label for the page title
+  const tabLabel = { materials: "Lectures", assignments: "Assignments", students: "Students" }[activeTab] || "Lectures";
 
   return (
     <Layout>
-      <div className="bg-white rounded-xl border border-[#E8E4DC] p-5 mb-6">
-        <p className="text-xs font-medium text-[#A8A199] mb-1">{course.code}</p>
-        <h1 className="text-2xl font-serif text-[#1A1A1A] mb-1">{course.name}</h1>
-        {course.description && (
-          <p className="text-sm text-[#6B6B6B]">{course.description}</p>
-        )}
-      </div>
-
-      {error && (
-        <div className="bg-[#FBEAE8] text-[#9B3A30] text-sm rounded-lg px-3 py-2 mb-4">
-          {error}
-        </div>
-      )}
-
-      <CourseTabs
-        tabs={[
-          { id: "materials", label: "Lecture Materials" },
-          { id: "assignments", label: "Assignments" },
-        ]}
-        active={activeTab}
-        onChange={setActiveTab}
-      />
-
-      {activeTab === "materials" && (
-        <div className="bg-white rounded-xl border border-[#E8E4DC] p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-serif text-lg text-[#1A1A1A]">Course material</h2>
-            <label className="text-sm font-medium text-white bg-[#1F4E3D] hover:bg-[#173B2E] px-3 py-1.5 rounded-lg cursor-pointer transition-colors">
-              {uploading ? "Uploading…" : "Upload PDF"}
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={handleUpload}
-                disabled={uploading}
-                className="hidden"
-              />
-            </label>
+      <PageShell
+        title={tabLabel}
+        subtitle={`${course.name} · ${course.code}`}
+      >
+        {/* Course description — only on materials tab */}
+        {activeTab === "materials" && course.description && (
+          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "14px 18px", marginBottom: "24px" }}>
+            <p style={{ fontSize: "14px", color: C.textSecondary, lineHeight: "1.6", margin: 0 }}>{course.description}</p>
           </div>
-
-          {documents.length === 0 ? (
-            <p className="text-sm text-[#6B6B6B]">No material uploaded yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {documents.map((doc) => (
-                <li
-                  key={doc.id}
-                  className="flex items-center justify-between border border-[#EFEBE3] rounded-lg px-3 py-2.5"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#1A1A1A] truncate">{doc.filename}</p>
-                    <p className="text-xs text-[#A8A199] mt-0.5">
-                      {doc.status === "indexed"
-                        ? `${doc.chunk_count} chunks indexed`
-                        : doc.status === "processing"
-                        ? "Processing…"
-                        : doc.error_message || "Failed"}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0 ml-3">
-                    {doc.status === "indexed" && (
-                      <>
-                        <button
-                          onClick={() => handleView(doc.id)}
-                          className="text-xs text-[#6C72E0] hover:underline"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => handleDownload(doc.id, doc.filename)}
-                          className="text-xs text-[#6C72E0] hover:underline"
-                        >
-                          Download
-                        </button>
-                      </>
-                    )}
-                    <StatusBadge status={doc.status} />
-                    <button
-                      onClick={() => handleDelete(doc.id)}
-                      className="text-xs text-[#C0392B] hover:underline"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {activeTab === "assignments" && <AssignmentsPanel courseId={courseId} />}
-
-      <div className="bg-white rounded-xl border border-[#E8E4DC] p-5 mt-6">
-        <h2 className="font-serif text-lg text-[#1A1A1A] mb-4">Enrolled students</h2>
-        {roster.length === 0 ? (
-          <p className="text-sm text-[#6B6B6B]">
-            No students enrolled yet. Contact an admin to enroll students.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {roster.map((student) => (
-              <li
-                key={student.id}
-                className="border border-[#EFEBE3] rounded-lg px-3 py-2"
-              >
-                <p className="text-sm text-[#1A1A1A]">{student.full_name}</p>
-                <p className="text-xs text-[#A8A199]">{student.email}</p>
-              </li>
-            ))}
-          </ul>
         )}
-      </div>
+
+        <Alert variant="error">{error}</Alert>
+
+        {/* ── Materials tab ── */}
+        {activeTab === "materials" && (
+          <Card>
+            <CardHeader
+              title="Lecture Materials"
+              count={documents.length}
+              action={
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", background: uploading ? C.textMuted : C.primary, color: "#fff", fontSize: "13px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                  <i className="ti ti-upload" style={{ fontSize: "14px" }} />
+                  {uploading ? "Uploading…" : "Upload PDF"}
+                  <input type="file" accept=".pdf" onChange={handleUpload} disabled={uploading} style={{ display: "none" }} />
+                </label>
+              }
+            />
+            <div style={{ padding: "8px 0" }}>
+              {documents.length === 0 ? (
+                <div style={{ padding: "40px 20px", textAlign: "center" }}>
+                  <i className="ti ti-file-upload" style={{ fontSize: "30px", color: C.border, display: "block", marginBottom: "10px" }} />
+                  <p style={{ fontSize: "14px", color: C.textMuted }}>No materials uploaded yet. Upload a PDF to get started.</p>
+                </div>
+              ) : (
+                documents.map((doc, i) => (
+                  <DocRow
+                    key={doc.id}
+                    doc={doc}
+                    last={i === documents.length - 1}
+                    onView={() => handleView(doc.id)}
+                    onDownload={() => handleDownload(doc.id, doc.filename)}
+                    onDelete={() => handleDelete(doc.id)}
+                  />
+                ))
+              )}
+            </div>
+          </Card>
+        )}
+
+        {/* ── Assignments tab ── */}
+        {activeTab === "assignments" && (
+          <AssignmentsPanel courseId={courseId} />
+        )}
+
+        {/* ── Students tab ── */}
+        {activeTab === "students" && (
+          <Card>
+            <CardHeader title="Enrolled students" count={roster.length} />
+            <div style={{ padding: "8px 0" }}>
+              {roster.length === 0 ? (
+                <div style={{ padding: "40px 20px", textAlign: "center" }}>
+                  <i className="ti ti-users" style={{ fontSize: "30px", color: C.border, display: "block", marginBottom: "10px" }} />
+                  <p style={{ fontSize: "14px", color: C.textMuted }}>No students enrolled yet. Contact an admin to enroll students.</p>
+                </div>
+              ) : (
+                roster.map((student, i) => (
+                  <div
+                    key={student.id}
+                    style={{ display: "flex", alignItems: "center", gap: "12px", padding: "13px 18px", borderBottom: i < roster.length - 1 ? `1px solid ${C.border}` : "none" }}
+                  >
+                    <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: C.infoBg, border: `1px solid ${C.infoBorder}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <span style={{ fontSize: "12px", fontWeight: "700", color: C.infoText }}>
+                        {student.full_name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontSize: "14px", fontWeight: "500", color: C.textPrimary, margin: 0 }}>{student.full_name}</p>
+                      <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>{student.email}</p>
+                    </div>
+                    {student.registration_number && (
+                      <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "600", color: C.textMuted, background: C.subtleBg, border: `1px solid ${C.border}`, padding: "3px 8px", borderRadius: "5px", fontFamily: "monospace" }}>
+                        {student.registration_number}
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        )}
+      </PageShell>
     </Layout>
+  );
+}
+
+function DocRow({ doc, last, onView, onDownload, onDelete }) {
+  const [hovered, setHovered] = useState(false);
+
+  const statusConfig = {
+    indexed:    { bg: C.successBg,  txt: C.successText,  label: `${doc.chunk_count} chunks indexed` },
+    processing: { bg: C.warningBg,  txt: C.warningText,  label: "Processing…"                       },
+    failed:     { bg: C.dangerBg,   txt: C.dangerText,   label: doc.error_message || "Failed"        },
+  }[doc.status] || { bg: C.subtleBg, txt: C.textMuted, label: doc.status };
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: "flex", alignItems: "center", gap: "14px", padding: "13px 18px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, transition: "background 0.12s" }}
+    >
+      <i className="ti ti-file-type-pdf" style={{ fontSize: "20px", color: C.accent, flexShrink: 0 }} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <p style={{ fontSize: "14px", fontWeight: "500", color: C.textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.filename}</p>
+        <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 7px", borderRadius: "4px", background: statusConfig.bg, color: statusConfig.txt }}>{statusConfig.label}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", flexShrink: 0 }}>
+        {doc.status === "indexed" && (
+          <>
+            <button onClick={onView} style={{ fontSize: "13px", color: C.textSecondary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>View</button>
+            <button onClick={onDownload} style={{ fontSize: "13px", color: C.textSecondary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Download</button>
+          </>
+        )}
+        <button onClick={onDelete} style={{ fontSize: "13px", color: C.dangerText, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Delete</button>
+      </div>
+    </div>
   );
 }

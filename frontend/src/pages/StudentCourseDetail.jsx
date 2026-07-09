@@ -1,24 +1,30 @@
 // src/pages/StudentCourseDetail.jsx
 import { useState, useEffect, useRef } from "react";
-import { useParams } from "react-router-dom";
-import Layout from "../components/Layout";
-import CourseTabs from "../components/CourseTabs";
-import AssignmentsPanel from "../components/student/AssignmentsPanel";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import Layout, { PageShell, Card, CardHeader, Alert } from "../components/Layout";
+import StudentAssignmentsPanel from "../components/student/AssignmentsPanel";
 import * as coursesApi from "../api/courses";
 import * as documentsApi from "../api/documents";
 import * as chatApi from "../api/chat";
+import { C, T } from "../theme";
 
 export default function StudentCourseDetail() {
   const { courseId } = useParams();
-  const [course, setCourse] = useState(null);
-  const [documents, setDocuments] = useState([]);
-  const [activeTab, setActiveTab] = useState("materials");
+  const location     = useLocation();
 
-  const [messages, setMessages] = useState([
+  // Active tab driven by ?tab= param — same approach as TeacherCourseDetail
+  const searchParams = new URLSearchParams(location.search);
+  const activeTab    = searchParams.get("tab") || "materials";
+
+  const [course,    setCourse]    = useState(null);
+  const [documents, setDocuments] = useState([]);
+
+  // Chat state
+  const [messages,  setMessages]  = useState([
     { role: "assistant", content: "Ask me anything about this course's material." },
   ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [input,     setInput]     = useState("");
+  const [chatting,  setChatting]  = useState(false);
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -33,11 +39,11 @@ export default function StudentCourseDetail() {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || chatting) return;
     const question = input.trim();
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: question }]);
-    setLoading(true);
+    setChatting(true);
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
@@ -53,125 +59,163 @@ export default function StudentCourseDetail() {
         const updated = [...prev];
         updated[updated.length - 1] = {
           role: "assistant",
-          content: err.response?.status === 403 ? "You don't have access to this course's material." : "Something went wrong.",
+          content: err.response?.status === 403
+            ? "You don't have access to this course's material."
+            : "Something went wrong. Please try again.",
           isError: true,
         };
         return updated;
       });
     } finally {
-      setLoading(false);
+      setChatting(false);
     }
   };
 
-  if (!course) return <Layout><p className="text-sm text-[#6B6B6B]">Loading…</p></Layout>;
+  if (!course) return (
+    <Layout>
+      <PageShell title="Loading…">
+        <p style={{ color: C.textMuted, fontSize: "14px" }}>Fetching course details…</p>
+      </PageShell>
+    </Layout>
+  );
+
+  const tabLabel = { materials: "Lectures", assignments: "Assignments", chatbot: "AI Assistant" }[activeTab] || "Lectures";
 
   return (
     <Layout>
-      <div className="bg-white rounded-xl border border-[#E8E4DC] p-5 mb-6">
-        <p className="text-xs font-medium text-[#A8A199] mb-1">{course.code}</p>
-        <h1 className="text-2xl font-serif text-[#1A1A1A] mb-1">{course.name}</h1>
-        {course.description && <p className="text-sm text-[#6B6B6B]">{course.description}</p>}
-      </div>
+      <PageShell title={tabLabel} subtitle={`${course.name} · ${course.code}`}>
 
-      <CourseTabs
-  tabs={[
-    { id: "materials", label: "Lecture Materials" },
-    { id: "assignments", label: "Assignments" },
-    { id: "chatbot", label: "AI Assistant" },
-  ]}
-  active={activeTab}
-  onChange={setActiveTab}
-/>
-
-      {activeTab === "materials" && (
-        <div className="bg-white rounded-xl border border-[#E8E4DC] p-5">
-          {documents.length === 0 ? (
-            <p className="text-sm text-[#6B6B6B]">No lecture materials uploaded yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {documents.map((doc) => (
-                <li key={doc.id} className="flex items-center justify-between border border-[#EFEBE3] rounded-lg px-4 py-3">
-                  <div>
-                    <p className="text-sm text-[#1A1A1A]">{doc.filename}</p>
-                    <p className="text-xs text-[#A8A199]">
-                      Uploaded {new Date(doc.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => documentsApi.viewDocument(courseId, doc.id)}
-                      className="text-sm text-[#1F4E3D] font-medium hover:underline"
-                    >
-                      View
-                    </button>
-                    <button
-                      onClick={() => documentsApi.downloadDocument(courseId, doc.id, doc.filename)}
-                      className="text-sm text-[#1F4E3D] font-medium hover:underline"
-                    >
-                      Download
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {activeTab === "assignments" && <AssignmentsPanel courseId={courseId} />}
-
-      {activeTab === "chatbot" && (
-        <div className="bg-white rounded-xl border border-[#E8E4DC] flex flex-col h-[55vh]">
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-lg rounded-2xl px-4 py-2.5 text-sm ${
-                  msg.role === "user" ? "bg-[#1F4E3D] text-white rounded-br-sm"
-                  : msg.isError ? "bg-[#FBEAE8] text-[#9B3A30] rounded-bl-sm"
-                  : "bg-[#F1EEE7] text-[#1A1A1A] rounded-bl-sm"
-                }`}>
-                  <p className="whitespace-pre-wrap leading-relaxed prose-justify">{msg.content}</p>
-                  {msg.sources?.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-black/10">
-                      <p className="text-xs opacity-60 font-medium mb-1">Sources</p>
-                      {msg.sources.map((s, j) => <p key={j} className="text-xs opacity-60 italic">"{s}"</p>)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-[#F1EEE7] rounded-2xl rounded-bl-sm px-4 py-2.5">
-                  <div className="flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-[#A8A199] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-1.5 h-1.5 bg-[#A8A199] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-1.5 h-1.5 bg-[#A8A199] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
-                </div>
+        {/* ── Lecture Materials ── */}
+        {activeTab === "materials" && (
+          <>
+            {course.description && (
+              <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "14px 18px", marginBottom: "20px" }}>
+                <p style={{ fontSize: "14px", color: C.textSecondary, lineHeight: "1.6", margin: 0 }}>{course.description}</p>
               </div>
             )}
-            <div ref={endRef} />
+            <Card>
+              <CardHeader title="Lecture Materials" count={documents.length} />
+              <div style={{ padding: "8px 0" }}>
+                {documents.length === 0 ? (
+                  <div style={{ padding: "40px 20px", textAlign: "center" }}>
+                    <i className="ti ti-file-upload" style={{ fontSize: "30px", color: C.border, display: "block", marginBottom: "10px" }} />
+                    <p style={{ fontSize: "14px", color: C.textMuted, margin: 0 }}>No lecture materials uploaded yet.</p>
+                  </div>
+                ) : (
+                  documents.map((doc, i) => (
+                    <DocRow
+                      key={doc.id}
+                      doc={doc}
+                      last={i === documents.length - 1}
+                      onView={() => documentsApi.viewDocument(courseId, doc.id)}
+                      onDownload={() => documentsApi.downloadDocument(courseId, doc.id, doc.filename)}
+                    />
+                  ))
+                )}
+              </div>
+            </Card>
+          </>
+        )}
+
+        {/* ── Assignments ── */}
+        {activeTab === "assignments" && (
+          <StudentAssignmentsPanel courseId={courseId} />
+        )}
+
+        {/* ── AI Assistant (Chatbot) ── */}
+        {activeTab === "chatbot" && (
+          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: "400px" }}>
+            {/* Messages */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "20px 20px 0" }}>
+              {messages.map((msg, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start", marginBottom: "12px" }}>
+                  {msg.role === "assistant" && (
+                    <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: "8px", alignSelf: "flex-end" }}>
+                      <i className="ti ti-sparkles" style={{ fontSize: "13px", color: "#fff" }} />
+                    </div>
+                  )}
+                  <div style={{
+                    maxWidth: "68%", borderRadius: "12px", padding: "11px 14px", fontSize: "14px", lineHeight: "1.6",
+                    background: msg.role === "user" ? C.primary : msg.isError ? C.dangerBg : C.subtleBg,
+                    color: msg.role === "user" ? "#fff" : msg.isError ? C.dangerText : C.textPrimary,
+                    borderBottomRightRadius: msg.role === "user" ? "3px" : "12px",
+                    borderBottomLeftRadius: msg.role === "assistant" ? "3px" : "12px",
+                  }}>
+                    <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{msg.content}</p>
+                  </div>
+                </div>
+              ))}
+              {/* Typing indicator */}
+              {chatting && (
+                <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: "12px" }}>
+                  <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: "8px" }}>
+                    <i className="ti ti-sparkles" style={{ fontSize: "13px", color: "#fff" }} />
+                  </div>
+                  <div style={{ background: C.subtleBg, borderRadius: "12px", borderBottomLeftRadius: "3px", padding: "14px 16px", display: "flex", gap: "4px", alignItems: "center" }}>
+                    {[0, 150, 300].map((delay) => (
+                      <span key={delay} style={{ width: "6px", height: "6px", background: C.textMuted, borderRadius: "50%", display: "inline-block", animation: "bounce 1s infinite", animationDelay: `${delay}ms` }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div ref={endRef} style={{ height: "20px" }} />
+            </div>
+
+            {/* Input */}
+            <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", gap: "10px" }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                placeholder="Ask about this course…"
+                disabled={chatting}
+                style={{ flex: 1, background: C.inputBg, border: "1.5px solid transparent", borderRadius: "7px", padding: "10px 13px", fontSize: "14px", color: C.textPrimary, fontFamily: "inherit", outline: "none" }}
+                onFocus={(e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = "#fff"; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; }}
+                onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = C.inputBg; e.target.style.boxShadow = "none"; }}
+              />
+              <button
+                onClick={handleSend}
+                disabled={chatting || !input.trim()}
+                style={{ background: C.primary, color: "#fff", border: "none", borderRadius: "7px", padding: "10px 18px", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: chatting || !input.trim() ? "not-allowed" : "pointer", opacity: chatting || !input.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <i className="ti ti-send" style={{ fontSize: "15px" }} />Send
+              </button>
+            </div>
+            <style>{`@keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }`}</style>
           </div>
-          <div className="border-t border-[#E8E4DC] p-3 flex gap-2">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Ask a question…"
-              disabled={loading}
-              className="flex-1 border border-[#D8D3C8] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1F4E3D]/30"
-            />
-            <button
-              onClick={handleSend}
-              disabled={loading || !input.trim()}
-              className="bg-[#1F4E3D] hover:bg-[#173B2E] disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-            >
-              Send
-            </button>
-          </div>
-        </div>
-      )}
+        )}
+      </PageShell>
     </Layout>
+  );
+}
+
+function DocRow({ doc, last, onView, onDownload }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: "flex", alignItems: "center", gap: "14px", padding: "13px 18px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, transition: "background 0.12s" }}
+    >
+      <i className="ti ti-file-type-pdf" style={{ fontSize: "20px", color: C.accent, flexShrink: 0 }} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <p style={{ fontSize: "14px", fontWeight: "500", color: C.textPrimary, margin: "0 0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.filename}</p>
+        {doc.created_at && (
+          <p style={{ fontSize: "11px", color: C.textMuted, margin: 0 }}>
+            Added {new Date(doc.created_at).toLocaleDateString()}
+          </p>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: "10px", flexShrink: 0 }}>
+        <button onClick={onView}
+          style={{ fontSize: "13px", fontWeight: "500", color: C.textSecondary, background: "none", border: `1px solid ${C.border}`, borderRadius: "6px", padding: "5px 11px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "5px" }}>
+          <i className="ti ti-eye" style={{ fontSize: "13px" }} />View
+        </button>
+        <button onClick={onDownload}
+          style={{ fontSize: "13px", fontWeight: "500", color: C.textSecondary, background: "none", border: `1px solid ${C.border}`, borderRadius: "6px", padding: "5px 11px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "5px" }}>
+          <i className="ti ti-download" style={{ fontSize: "13px" }} />Download
+        </button>
+      </div>
+    </div>
   );
 }

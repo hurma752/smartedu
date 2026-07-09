@@ -1,54 +1,119 @@
 // src/pages/TeacherDashboard.jsx
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import Layout from "../components/Layout";
+import { useNavigate } from "react-router-dom";
+import Layout, { PageShell } from "../components/Layout";
 import * as coursesApi from "../api/courses";
+import { getErrorMessage } from "../utils/errorMessage";
+import { C, T } from "../theme";
 
 export default function TeacherDashboard() {
-  const [courses, setCourses] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [courses,       setCourses]       = useState([]);
+  const [totalStudents, setTotalStudents] = useState(0);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     coursesApi.listTeachingCourses()
-      .then(({ data }) => setCourses(data))
-      .catch(() => setError("Couldn't load your courses."))
+      .then(async ({ data }) => {
+        setCourses(data);
+
+        // The teacher courses endpoint does NOT include student_count.
+        // Fetch each course's roster in parallel and sum the lengths.
+        try {
+          const sizes = await Promise.all(
+            data.map((c) =>
+              coursesApi.listRoster(c.id)
+                .then(({ data: roster }) => roster.length)
+                .catch(() => 0)
+            )
+          );
+          setTotalStudents(sizes.reduce((a, b) => a + b, 0));
+        } catch {
+          // Non-fatal — stat card stays at 0
+        }
+      })
+      .catch((err) => setError(getErrorMessage(err, "Couldn't load your courses.")))
       .finally(() => setLoading(false));
   }, []);
 
   return (
     <Layout>
-      <h1 className="text-2xl font-serif text-[#1A1A1A] mb-6">Your assigned courses</h1>
+      <PageShell title="Dashboard" subtitle="Your assigned courses">
 
-      {error && (
-        <div className="bg-[#FBEAE8] text-[#9B3A30] text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
-      )}
+        {error && (
+          <div style={{ background: C.dangerBg, color: C.dangerText, border: `1px solid ${C.dangerBorder}`, borderRadius: "7px", padding: "11px 14px", marginBottom: "22px", fontSize: "14px", display: "flex", gap: "9px", alignItems: "flex-start" }}>
+            <i className="ti ti-alert-circle" style={{ fontSize: "16px", flexShrink: 0, marginTop: "1px" }} />
+            {error}
+          </div>
+        )}
 
-      {loading ? (
-        <p className="text-sm text-[#6B6B6B]">Loading…</p>
-      ) : courses.length === 0 ? (
-        <div className="bg-white rounded-xl border border-[#E8E4DC] p-8 text-center">
-          <p className="text-[#6B6B6B] text-sm">
-            You haven't been assigned to any courses yet. Contact an admin.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {courses.map((course) => (
-            <Link
-              key={course.id}
-              to={`/teacher/courses/${course.id}`}
-              className="bg-white rounded-xl border border-[#E8E4DC] p-5 hover:border-[#1F4E3D] transition-colors"
-            >
-              <p className="text-xs font-medium text-[#A8A199] mb-1">{course.code}</p>
-              <h3 className="font-serif text-lg text-[#1A1A1A]">{course.name}</h3>
-              {course.description && (
-                <p className="text-sm text-[#6B6B6B] mt-1 line-clamp-2">{course.description}</p>
-              )}
-            </Link>
-          ))}
-        </div>
-      )}
+        {/* ── Stat bar ── */}
+        {!loading && courses.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "14px", marginBottom: "32px" }}>
+            <StatCard label="Assigned courses" value={courses.length}  accent={C.statCourses}  />
+            <StatCard label="Total students"   value={totalStudents}   accent={C.statStudents} />
+          </div>
+        )}
+
+        {/* ── Course list ── */}
+        {loading ? (
+          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "48px", textAlign: "center", color: C.textMuted, fontSize: "14px" }}>
+            Loading…
+          </div>
+        ) : courses.length === 0 ? (
+          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "56px 32px", textAlign: "center" }}>
+            <i className="ti ti-books" style={{ fontSize: "36px", color: C.border, display: "block", marginBottom: "14px" }} />
+            <p style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>No courses assigned</p>
+            <p style={{ fontSize: "14px", color: C.textMuted }}>Contact an admin to get assigned to a course.</p>
+          </div>
+        ) : (
+          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+            {courses.map((course, i) => (
+              <CourseRow
+                key={course.id}
+                course={course}
+                last={i === courses.length - 1}
+                onClick={() => navigate(`/teacher/courses/${course.id}`)}
+              />
+            ))}
+          </div>
+        )}
+      </PageShell>
     </Layout>
+  );
+}
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, borderLeft: `4px solid ${accent}`, padding: "20px 20px 18px" }}>
+      <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: C.textMuted, margin: "0 0 10px" }}>{label}</p>
+      <p style={{ fontSize: "32px", fontWeight: "700", letterSpacing: "-0.04em", lineHeight: 1, color: C.textPrimary, margin: 0 }}>{value}</p>
+    </div>
+  );
+}
+
+function CourseRow({ course, last, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, cursor: "pointer", transition: "background 0.12s", gap: "16px" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", minWidth: 0, flex: 1 }}>
+        <span style={{ fontSize: "11px", fontWeight: "700", color: C.accentText, background: C.accentTint, padding: "4px 8px", borderRadius: "5px", letterSpacing: "0.04em", flexShrink: 0 }}>
+          {course.code}
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, margin: "0 0 3px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</p>
+          {course.description && (
+            <p style={{ fontSize: "12px", color: C.textMuted, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.description}</p>
+          )}
+        </div>
+      </div>
+      <i className="ti ti-arrow-right" style={{ fontSize: "16px", color: hovered ? C.accent : C.textMuted, transition: "color 0.12s", flexShrink: 0 }} />
+    </div>
   );
 }
