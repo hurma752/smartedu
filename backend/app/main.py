@@ -1,10 +1,12 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, admin, courses, documents, chat
 import ollama
 from app.config import settings
-from app.routers import auth, admin, courses, documents, chat, password, assignments
+from app.database.db import SessionLocal
+from app.routers import auth, admin, courses, documents, chat, password, assignments, badges
+from app.services.badge_service import seed_default_achievements
+
 app = FastAPI(
     title="SmartEdu API",
     description="AI-powered Learning Management System",
@@ -25,14 +27,13 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(courses.router, prefix="/api/courses", tags=["Courses"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chatbot"])
-
 app.include_router(assignments.router, prefix="/api/assignments", tags=["Assignments"])
-
+app.include_router(badges.router, prefix="/api/badges", tags=["Badges"])
 
 
 @app.on_event("startup")
-def warm_up_ollama():
-    """Loads the model into memory at startup so the first real request is not slow."""
+def startup_tasks():
+    # 1. Warm up Ollama
     try:
         ollama.chat(
             model=settings.OLLAMA_MODEL,
@@ -43,6 +44,15 @@ def warm_up_ollama():
     except Exception as e:
         print(f"Ollama warm-up failed (is Ollama running?): {e}")
 
+    # 2. Seed default achievements
+    try:
+        db = SessionLocal()
+        seed_default_achievements(db)
+        db.close()
+        print("Default achievements seeded.")
+    except Exception as e:
+        print(f"Achievement seeding failed: {e}")
+
 
 @app.get("/")
 def root():
@@ -52,4 +62,3 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
-

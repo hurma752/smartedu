@@ -1,37 +1,39 @@
 // src/api/chat.js
 import client from "./client";
 
-export const sendMessage = (courseId, message) =>
-  client.post("/chat/", { course_id: courseId, message });
-
-// src/api/chat.js — add alongside the existing sendMessage
-export const sendMessageStream = async (courseId, message, onToken) => {
+export async function sendMessageStream(courseId, message, onChunk, signal) {
   const token = localStorage.getItem("token");
-  const response = await fetch("http://localhost:8000/api/chat/stream", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ course_id: courseId, message }),
-  });
-
+  const response = await fetch(
+    `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/chat/stream`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ course_id: courseId, message }),
+      signal, // ← AbortController.signal passed straight to fetch
+    }
+  );
+ 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw { response: { status: response.status, data: err } };
+    const err = new Error("Stream request failed");
+    err.response = { status: response.status };
+    throw err;
   }
-
+ 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let fullText = "";
-
+ 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    const chunk = decoder.decode(value);
-    fullText += chunk;
-    onToken(fullText);
+    fullText += decoder.decode(value, { stream: true });
+    onChunk(fullText);
   }
-
-  return fullText;
-};
+}
+ 
+export function sendMessage(courseId, message) {
+  return client.post("/api/chat/", { course_id: courseId, message });
+}

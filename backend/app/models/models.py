@@ -1,13 +1,13 @@
 # app/models/models.py — UPDATED
 
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint, JSON
+    Column, Integer, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint, JSON, Float
 )
-
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database.db import Base
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Float, func
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -21,9 +21,6 @@ class User(Base):
     registration_number = Column(String(50), unique=True, nullable=True)
     has_set_password = Column(Boolean, default=False, nullable=False)
 
-    # FIX: explicitly tell each relationship which FK column to use,
-    # since TeacherCourseAssignment/Enrollment/Course each have MORE
-    # THAN ONE foreign key pointing back at users.id
     teaching_assignments = relationship(
         "TeacherCourseAssignment",
         back_populates="teacher",
@@ -65,8 +62,8 @@ class TeacherCourseAssignment(Base):
     __tablename__ = "teacher_course_assignments"
 
     id = Column(Integer, primary_key=True, index=True)
-    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
     assigned_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     assigned_at = Column(DateTime, server_default=func.now())
 
@@ -98,8 +95,8 @@ class Enrollment(Base):
 
     __table_args__ = (UniqueConstraint("student_id", "course_id", name="unique_enrollment"),)
 
+
 class Document(Base):
-    """Unchanged from Stage 4 — teachers still upload, just gated by assignment now instead of ownership."""
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -125,12 +122,13 @@ class ChatHistory(Base):
     role = Column(String(20), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
+
 class Rubric(Base):
     __tablename__ = "rubrics"
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)  # teacher
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String(255), nullable=False)
     total_marks = Column(Integer, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
@@ -140,13 +138,12 @@ class Rubric(Base):
 
 
 class RubricCriterion(Base):
-    """One rubric has several weighted criteria — e.g. Understanding=5, Clarity=4."""
     __tablename__ = "rubric_criteria"
 
     id = Column(Integer, primary_key=True, index=True)
     rubric_id = Column(Integer, ForeignKey("rubrics.id", ondelete="CASCADE"), nullable=False)
-    key = Column(String(50), nullable=False)          # short machine key, e.g. "understanding"
-    label = Column(String(255), nullable=False)        # display name, e.g. "Understanding of Concept"
+    key = Column(String(50), nullable=False)
+    label = Column(String(255), nullable=False)
     max_marks = Column(Integer, nullable=False)
     description = Column(Text, nullable=True)
 
@@ -167,6 +164,7 @@ class Assignment(Base):
 
     rubric = relationship("Rubric", back_populates="assignments")
     submissions = relationship("Submission", back_populates="assignment", cascade="all, delete-orphan")
+    deadline_history = relationship("AssignmentDeadlineHistory", back_populates="assignment", cascade="all, delete-orphan")
 
 
 class Submission(Base):
@@ -183,50 +181,45 @@ class Submission(Base):
     error_message = Column(Text, nullable=True)
     submitted_at = Column(DateTime, server_default=func.now())
 
-    # ADD THESE THREE — must match what the migration added to PostgreSQL
     ai_score = Column(Float, nullable=True)
     plagiarism_score = Column(Float, nullable=True)
     detection_status = Column(String(30), default="not_checked", nullable=True)
 
-    # relationships
     assignment = relationship("Assignment", back_populates="submissions")
     ai_evaluation = relationship("AIEvaluation", back_populates="submission", uselist=False, cascade="all, delete-orphan")
     final_grade = relationship("FinalGrade", back_populates="submission", uselist=False, cascade="all, delete-orphan")
+
+
 class AIEvaluation(Base):
-    """The LLM's PRELIMINARY scoring — never shown to students directly."""
     __tablename__ = "ai_evaluations"
 
     id = Column(Integer, primary_key=True, index=True)
     submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True)
-    criteria_scores = Column(JSON, nullable=False)   # {"understanding": 5, "clarity": 4, ...}
+    criteria_scores = Column(JSON, nullable=False)
     total_score = Column(Integer, nullable=False)
     feedback = Column(Text, nullable=False)
-    raw_model_output = Column(Text, nullable=True)   # kept for debugging/viva evidence
+    raw_model_output = Column(Text, nullable=True)
     evaluated_at = Column(DateTime, server_default=func.now())
 
     submission = relationship("Submission", back_populates="ai_evaluation")
 
 
 class FinalGrade(Base):
-    """The teacher's DECISION — this is the only grade a student ever sees."""
     __tablename__ = "final_grades"
 
     id = Column(Integer, primary_key=True, index=True)
     submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True)
-    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=False)  # teacher
-    criteria_scores = Column(JSON, nullable=False)   # teacher's final per-criterion marks (may equal or override AI's)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    criteria_scores = Column(JSON, nullable=False)
     total_score = Column(Integer, nullable=False)
     teacher_comments = Column(Text, nullable=True)
-    was_ai_overridden = Column(Boolean, default=False)  # true if teacher changed any AI score
+    was_ai_overridden = Column(Boolean, default=False)
     reviewed_at = Column(DateTime, server_default=func.now())
 
     submission = relationship("Submission", back_populates="final_grade")
 
+
 class PasswordResetToken(Base):
-    """
-    Used for both first-time account setup AND forgot-password reset.
-    Same mechanism, two different email templates, one code path.
-    """
     __tablename__ = "password_reset_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -235,3 +228,54 @@ class PasswordResetToken(Base):
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW: Achievement & Badge Framework Models
+# ══════════════════════════════════════════════════════════════════════
+
+class Achievement(Base):
+    __tablename__ = "achievements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)  # e.g. "first_submitter", "high_achiever"
+    title = Column(String(100), nullable=False)
+    description = Column(Text, nullable=False)
+    badge_icon = Column(String(50), default="ti-award")  # Tabler icon name
+    color_scheme = Column(String(50), default="primary")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class StudentAchievement(Base):
+    __tablename__ = "student_achievements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    achievement_id = Column(Integer, ForeignKey("achievements.id", ondelete="CASCADE"), nullable=False)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="CASCADE"), nullable=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    earned_at = Column(DateTime, server_default=func.now())
+
+    student = relationship("User", foreign_keys=[student_id])
+    achievement = relationship("Achievement")
+    assignment = relationship("Assignment")
+    course = relationship("Course")
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "achievement_id", "assignment_id", name="unique_student_assignment_achievement"),
+    )
+
+
+class AssignmentDeadlineHistory(Base):
+    __tablename__ = "assignment_deadline_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="CASCADE"), nullable=False, index=True)
+    previous_due_date = Column(DateTime, nullable=True)
+    new_due_date = Column(DateTime, nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now())
+    reason = Column(Text, nullable=True)
+
+    assignment = relationship("Assignment", back_populates="deadline_history")
+    updater = relationship("User", foreign_keys=[updated_by])

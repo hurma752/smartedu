@@ -3,29 +3,54 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout, { PageShell } from "../components/Layout";
 import * as coursesApi from "../api/courses";
+import * as badgesApi from "../api/badges";
+import BadgePill from "../components/BadgePill";
 import { getErrorMessage } from "../utils/errorMessage";
-import { C, T } from "../theme";
+import { C } from "../theme";
 
 export default function StudentDashboard() {
   const [courses, setCourses] = useState([]);
+  const [badges, setBadges] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState("");
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
-    coursesApi.listEnrolledCourses()
-      .then(({ data }) => setCourses(data))
+    Promise.all([
+      coursesApi.listEnrolledCourses(),
+      badgesApi.getMyBadges().catch(() => ({ data: [] })),
+    ])
+      .then(([{ data: cData }, { data: bData }]) => {
+        setCourses(cData);
+        setBadges(bData || []);
+      })
       .catch((err) => setError(getErrorMessage(err, "Couldn't load your courses.")))
       .finally(() => setLoading(false));
   }, []);
 
   return (
     <Layout>
-      <PageShell title="My Courses" subtitle="Courses you're enrolled in">
-
+      <PageShell title="My Dashboard" subtitle="Courses and earned achievements">
         {error && (
           <div style={{ background: C.dangerBg, color: C.dangerText, border: `1px solid ${C.dangerBorder}`, borderRadius: "7px", padding: "11px 14px", marginBottom: "20px", fontSize: "14px", display: "flex", gap: "8px" }}>
             <i className="ti ti-alert-circle" style={{ fontSize: "16px", flexShrink: 0 }} />{error}
+          </div>
+        )}
+
+        {/* Earned Badges Showcase */}
+        {badges.length > 0 && (
+          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "16px 20px", marginBottom: "20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+              <i className="ti ti-award" style={{ fontSize: "18px", color: C.accent }} />
+              <h3 style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, margin: 0 }}>
+                Earned Achievements ({badges.length})
+              </h3>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {badges.map((b) => (
+                <BadgePill key={b.id} badge={b} size="md" />
+              ))}
+            </div>
           </div>
         )}
 
@@ -40,15 +65,18 @@ export default function StudentDashboard() {
             <p style={{ fontSize: "14px", color: C.textMuted, margin: 0 }}>Ask your administrator to enroll you in a course.</p>
           </div>
         ) : (
-          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
-            {courses.map((course, i) => (
-              <CourseRow
-                key={course.id}
-                course={course}
-                last={i === courses.length - 1}
-                onClick={() => navigate(`/student/courses/${course.id}`)}
-              />
-            ))}
+          <div>
+            <h3 style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, marginBottom: "10px" }}>Enrolled Courses</h3>
+            <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+              {courses.map((course, i) => (
+                <CourseRow
+                  key={course.id}
+                  course={course}
+                  last={i === courses.length - 1}
+                  onClick={() => navigate(`/student/courses/${course.id}`)}
+                />
+              ))}
+            </div>
           </div>
         )}
       </PageShell>

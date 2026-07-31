@@ -1,15 +1,18 @@
 // src/components/student/AssignmentsPanel.jsx
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as assignmentsApi from "../../api/assignments";
-import { C, T } from "../../theme";
+import * as badgesApi from "../../api/badges";
+import BadgePill from "../BadgePill";
+import { C } from "../../theme";
 
 export default function StudentAssignmentsPanel({ courseId }) {
-  const [assignments,            setAssignments]            = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [submissionsByAssignment, setSubmissionsByAssignment] = useState({});
-  const [grades,                 setGrades]                 = useState({});
-  const [uploadingId,            setUploadingId]            = useState(null);
-  const [error,                  setError]                  = useState("");
-  const [justSubmitted,          setJustSubmitted]          = useState({});
+  const [grades, setGrades] = useState({});
+  const [badgesByAssignment, setBadgesByAssignment] = useState({});
+  const [uploadingId, setUploadingId] = useState(null);
+  const [error, setError] = useState("");
+  const [justSubmitted, setJustSubmitted] = useState({});
   const pollRef = useRef(null);
 
   const isPastDeadline = (a) => a.due_date && new Date() > new Date(a.due_date);
@@ -37,7 +40,20 @@ export default function StudentAssignmentsPanel({ courseId }) {
     }
   };
 
-  const loadExistingSubmissions = useCallback(async (list) => {
+  const loadExistingData = useCallback(async (list) => {
+    // Fetch student's earned badges
+    try {
+      const { data: myBadges } = await badgesApi.getMyBadges();
+      const badgeMap = {};
+      for (const b of myBadges) {
+        if (b.assignment_id) {
+          if (!badgeMap[b.assignment_id]) badgeMap[b.assignment_id] = [];
+          badgeMap[b.assignment_id].push(b);
+        }
+      }
+      setBadgesByAssignment(badgeMap);
+    } catch { /* ignore */ }
+
     for (const a of list) {
       try {
         const { data } = await assignmentsApi.getMySubmissionForAssignment(a.id);
@@ -48,16 +64,16 @@ export default function StudentAssignmentsPanel({ courseId }) {
             setGrades((prev) => ({ ...prev, [a.id]: gradeRes.data }));
           }
         }
-      } catch { /* no submission yet — expected */ }
+      } catch { /* no submission yet */ }
     }
   }, []);
 
   useEffect(() => {
     assignmentsApi.listAssignments(courseId).then(({ data }) => {
       setAssignments(data);
-      loadExistingSubmissions(data);
+      loadExistingData(data);
     });
-  }, [courseId, loadExistingSubmissions]);
+  }, [courseId, loadExistingData]);
 
   const handleUpload = async (assignmentId, file) => {
     if (!file) return;
@@ -102,8 +118,9 @@ export default function StudentAssignmentsPanel({ courseId }) {
       <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
         {assignments.map((a) => {
           const submission = submissionsByAssignment[a.id];
-          const grade      = grades[a.id];
-          const past       = isPastDeadline(a);
+          const grade = grades[a.id];
+          const badges = badgesByAssignment[a.id] || [];
+          const past = isPastDeadline(a);
 
           return (
             <AssignmentCard
@@ -111,6 +128,7 @@ export default function StudentAssignmentsPanel({ courseId }) {
               assignment={a}
               submission={submission}
               grade={grade}
+              badges={badges}
               past={past}
               justSubmitted={!!justSubmitted[a.id]}
               uploading={uploadingId === a.id}
@@ -127,13 +145,18 @@ export default function StudentAssignmentsPanel({ courseId }) {
 }
 
 // ─── Assignment card ─────────────────────────────────────────────────────────
-function AssignmentCard({ assignment: a, submission, grade, past, justSubmitted, uploading, onUpload, onDelete, onViewSubmission, onDownloadSubmission }) {
+function AssignmentCard({ assignment: a, submission, grade, badges, past, justSubmitted, uploading, onUpload, onDelete, onViewSubmission, onDownloadSubmission }) {
   return (
     <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
       {/* Header */}
       <div style={{ padding: "16px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, margin: "0 0 4px" }}>{a.title}</p>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "4px" }}>
+            <p style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, margin: 0 }}>{a.title}</p>
+            {badges.map((b) => (
+              <BadgePill key={b.id} badge={b} size="sm" />
+            ))}
+          </div>
           {a.description && (
             <p style={{ fontSize: "13px", color: C.textSecondary, margin: "0 0 6px", lineHeight: "1.5", whiteSpace: "pre-wrap" }}>{a.description}</p>
           )}
@@ -149,15 +172,12 @@ function AssignmentCard({ assignment: a, submission, grade, past, justSubmitted,
 
       {/* Body */}
       <div style={{ padding: "14px 18px" }}>
-
-        {/* Success banner */}
         {justSubmitted && (
           <div style={{ background: C.successBg, color: C.successText, border: `1px solid ${C.successBorder}`, borderRadius: "7px", padding: "10px 13px", marginBottom: "12px", fontSize: "13px", display: "flex", gap: "8px" }}>
             <i className="ti ti-circle-check" style={{ fontSize: "15px" }} />Submitted successfully. We'll notify you once it's graded.
           </div>
         )}
 
-        {/* If submitted: file links + lock/delete */}
         {submission && (
           <div style={{ marginBottom: grade ? "14px" : "0" }}>
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -188,10 +208,8 @@ function AssignmentCard({ assignment: a, submission, grade, past, justSubmitted,
           </div>
         )}
 
-        {/* No submission yet */}
         {!submission && (
           <div>
-            {/* Rubric preview */}
             {a.criteria?.length > 0 && (
               <div style={{ background: C.subtleBg, borderRadius: "7px", padding: "12px 14px", marginBottom: "12px" }}>
                 <p style={{ fontSize: "12px", fontWeight: "700", color: C.textPrimary, margin: "0 0 8px", display: "flex", alignItems: "center", gap: "6px" }}>
@@ -209,7 +227,6 @@ function AssignmentCard({ assignment: a, submission, grade, past, justSubmitted,
               </div>
             )}
 
-            {/* Upload or deadline-passed */}
             {past ? (
               <div style={{ background: C.dangerBg, color: C.dangerText, border: `1px solid ${C.dangerBorder}`, borderRadius: "7px", padding: "10px 13px", fontSize: "13px", display: "flex", gap: "8px" }}>
                 <i className="ti ti-lock" style={{ fontSize: "15px" }} />The deadline has passed. Submissions are no longer accepted.
@@ -224,14 +241,12 @@ function AssignmentCard({ assignment: a, submission, grade, past, justSubmitted,
           </div>
         )}
 
-        {/* Grade display */}
         {grade && <GradeDisplay grade={grade} />}
       </div>
     </div>
   );
 }
 
-// ─── Submission status badge ─────────────────────────────────────────────────
 function SubmissionBadge({ status }) {
   const map = {
     processing:       { bg: C.warningBg,  txt: C.warningText,  icon: "ti-loader-2",      label: "Processing"  },
@@ -247,7 +262,6 @@ function SubmissionBadge({ status }) {
   );
 }
 
-// ─── Grade display ───────────────────────────────────────────────────────────
 function GradeDisplay({ grade }) {
   let feedback = null;
   try {
@@ -256,13 +270,11 @@ function GradeDisplay({ grade }) {
 
   return (
     <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "14px", marginTop: "14px" }}>
-      {/* Score header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
         <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>Final Grade</span>
         <span style={{ fontSize: "22px", fontWeight: "800", letterSpacing: "-0.03em", color: C.primary }}>{grade.total_score}</span>
       </div>
 
-      {/* Criterion breakdown */}
       {feedback?.criteria_feedback?.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
           {feedback.criteria_feedback.map((cf, i) => (
@@ -290,7 +302,6 @@ function GradeDisplay({ grade }) {
         </div>
       )}
 
-      {/* Strengths */}
       {feedback?.strengths?.length > 0 && (
         <div style={{ background: C.successBg, border: `1px solid ${C.successBorder}`, borderRadius: "7px", padding: "10px 12px", marginBottom: "8px" }}>
           <p style={{ fontSize: "11px", fontWeight: "700", color: C.successText, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 6px" }}>Strengths</p>
@@ -302,7 +313,6 @@ function GradeDisplay({ grade }) {
         </div>
       )}
 
-      {/* Weaknesses */}
       {feedback?.weaknesses?.length > 0 && (
         <div style={{ background: C.dangerBg, border: `1px solid ${C.dangerBorder}`, borderRadius: "7px", padding: "10px 12px", marginBottom: "8px" }}>
           <p style={{ fontSize: "11px", fontWeight: "700", color: C.dangerText, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 6px" }}>Areas to improve</p>
@@ -314,7 +324,6 @@ function GradeDisplay({ grade }) {
         </div>
       )}
 
-      {/* Suggestions */}
       {feedback?.improvements?.length > 0 && (
         <div style={{ background: C.infoBg, border: `1px solid ${C.infoBorder}`, borderRadius: "7px", padding: "10px 12px", marginBottom: "8px" }}>
           <p style={{ fontSize: "11px", fontWeight: "700", color: C.infoText, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 6px" }}>Suggestions</p>
@@ -326,12 +335,10 @@ function GradeDisplay({ grade }) {
         </div>
       )}
 
-      {/* Summary */}
       {feedback?.summary && (
         <p style={{ fontSize: "12px", color: C.textMuted, fontStyle: "italic", margin: "0 0 8px", lineHeight: "1.6" }}>{feedback.summary}</p>
       )}
 
-      {/* Teacher comments */}
       {grade.teacher_comments && (
         <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "10px", marginTop: "10px" }}>
           <p style={{ fontSize: "12px", fontWeight: "700", color: C.textPrimary, margin: "0 0 4px", display: "flex", alignItems: "center", gap: "5px" }}>

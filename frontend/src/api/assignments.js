@@ -5,6 +5,9 @@ export const createAssignment = (courseId, data) =>
   client.post(`/assignments/${courseId}`, data);
 export const listAssignments = (courseId) => client.get(`/assignments/${courseId}`);
 
+export const getAssignmentDetail = (assignmentId) =>
+  client.get(`/assignments/detail/${assignmentId}`);
+
 export const submitAssignment = (assignmentId, file) => {
   const formData = new FormData();
   formData.append("file", file);
@@ -32,6 +35,15 @@ export const getMySubmissionForAssignment = (assignmentId) =>
   client.get(`/assignments/${assignmentId}/my-submission`);
 
 export const deleteAssignment = (assignmentId) => client.delete(`/assignments/${assignmentId}`);
+
+export const extendDeadline = (assignmentId, newDueDate, reason) =>
+  client.put(`/assignments/${assignmentId}/extend-deadline`, { new_due_date: newDueDate, reason });
+
+export const getDeadlineHistory = (assignmentId) =>
+  client.get(`/assignments/${assignmentId}/deadline-history`);
+
+export const getAssignmentBadges = (assignmentId) =>
+  client.get(`/assignments/${assignmentId}/badges`);
 
 export const viewSubmissionFile = async (submissionId) => {
   try {

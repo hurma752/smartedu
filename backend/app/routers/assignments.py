@@ -1,11 +1,12 @@
 # app/routers/assignments.py
 import os
 import shutil
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.responses import FileResponse
 from datetime import datetime
+from pydantic import BaseModel
 
 from app.database.db import get_db, SessionLocal
 from app.schemas.assignment import (
@@ -15,13 +16,20 @@ from app.schemas.assignment import (
 from app.utils.auth import require_role, get_current_user
 from app.routers.courses import get_course_for_access
 from app.services.evaluation_service import evaluate_submission_task
+from app.services.badge_service import evaluate_assignment_badges, get_assignment_badges
+from app.services.cache_service import lms_context_cache
 from app.config import settings
 from app.models.models import (
     User, Assignment, Submission, AIEvaluation, FinalGrade, Enrollment,
-    Rubric, RubricCriterion  # ADD THESE TWO
+    Rubric, RubricCriterion, AssignmentDeadlineHistory
 )
 
 router = APIRouter()
+
+
+class ExtendDeadlineRequest(BaseModel):
+    new_due_date: datetime
+    reason: Optional[str] = None
 
 
 # ---------- Teacher: create assignment ----------
@@ -39,7 +47,6 @@ def create_assignment(
 
     total_marks = sum(c.max_marks for c in payload.criteria)
 
-    # Create the rubric automatically — teacher no longer does this separately
     rubric = Rubric(
         course_id=course_id,
         created_by=current_user.id,
@@ -73,7 +80,9 @@ def create_assignment(
     db.commit()
     db.refresh(assignment)
 
+    lms_context_cache.clear()
     return _assignment_with_criteria(assignment, db)
+
 
 def _assignment_with_criteria(assignment: Assignment, db: Session) -> dict:
     """Helper: attach criteria and total marks to assignment response."""
@@ -86,6 +95,7 @@ def _assignment_with_criteria(assignment: Assignment, db: Session) -> dict:
     result.criteria = criteria
     result.total_marks = rubric.total_marks if rubric else 0
     return result
+
 
 @router.get("/{course_id}", response_model=List[AssignmentResponse])
 def list_assignments(
@@ -100,7 +110,110 @@ def list_assignments(
     return [_assignment_with_criteria(a, db) for a in assignments]
 
 
-# New endpoint: student fetches rubric before submitting
+# ---------- Fetch single assignment (title, due date, criteria) ----------
+@router.get("/detail/{assignment_id}", response_model=AssignmentResponse)
+def get_assignment_detail(
+    assignment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
+    get_course_for_access(assignment.course_id, current_user, db)
+    return _assignment_with_criteria(assignment, db)
+
+
+# ---------- Teacher: Extend Deadline ----------
+@router.put("/{assignment_id}/extend-deadline")
+def extend_deadline(
+    assignment_id: int,
+    payload: ExtendDeadlineRequest,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
+
+    get_course_for_access(assignment.course_id, current_user, db)
+
+    previous_due = assignment.due_date
+
+    # Record deadline history audit log
+    history_entry = AssignmentDeadlineHistory(
+        assignment_id=assignment_id,
+        previous_due_date=previous_due,
+        new_due_date=payload.new_due_date,
+        updated_by=current_user.id,
+        reason=payload.reason,
+    )
+    db.add(history_entry)
+
+    # Update assignment due date
+    assignment.due_date = payload.new_due_date
+    db.commit()
+    db.refresh(assignment)
+
+    # Invalidate LMS context cache so AI chatbot and students get fresh date immediately
+    lms_context_cache.clear()
+
+    # Re-evaluate badges
+    evaluate_assignment_badges(assignment_id, db)
+
+    return {
+        "message": "Deadline updated successfully",
+        "assignment_id": assignment_id,
+        "previous_due_date": previous_due,
+        "new_due_date": assignment.due_date,
+    }
+
+
+@router.get("/{assignment_id}/deadline-history")
+def get_deadline_history(
+    assignment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
+    get_course_for_access(assignment.course_id, current_user, db)
+
+    histories = db.query(AssignmentDeadlineHistory).filter(
+        AssignmentDeadlineHistory.assignment_id == assignment_id
+    ).order_by(AssignmentDeadlineHistory.updated_at.desc()).all()
+
+    results = []
+    for h in histories:
+        results.append({
+            "id": h.id,
+            "previous_due_date": h.previous_due_date,
+            "new_due_date": h.new_due_date,
+            "updated_by": h.updater.full_name if h.updater else "Teacher",
+            "updated_at": h.updated_at,
+            "reason": h.reason,
+        })
+    return results
+
+
+@router.get("/{assignment_id}/badges")
+def get_badges_for_assignment_endpoint(
+    assignment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
+    get_course_for_access(assignment.course_id, current_user, db)
+
+    # Evaluate any pending badges (e.g. if deadline recently passed)
+    evaluate_assignment_badges(assignment_id, db)
+    return get_assignment_badges(assignment_id, db)
+
+
+# ---------- Student: fetch rubric ----------
 @router.get("/{assignment_id}/rubric")
 def get_assignment_rubric(
     assignment_id: int,
@@ -127,8 +240,8 @@ def get_assignment_rubric(
         ],
     }
 
-# ---------- Student: submit ----------
 
+# ---------- Student: submit ----------
 @router.post("/{assignment_id}/submit", response_model=SubmissionResponse)
 async def submit_assignment(
     assignment_id: int,
@@ -143,9 +256,6 @@ async def submit_assignment(
 
     get_course_for_access(assignment.course_id, current_user, db)
 
-    # ENFORCEMENT: reject the submission outright once the deadline has passed.
-    # Checked before any file is saved or any DB row created, so a late
-    # attempt leaves no partial state behind.
     if assignment.due_date and datetime.utcnow() > assignment.due_date:
         raise HTTPException(
             400,
@@ -179,6 +289,7 @@ async def submit_assignment(
 
     return submission
 
+
 # ---------- Student: check own submission status ----------
 @router.get("/submissions/{submission_id}", response_model=SubmissionResponse)
 def get_submission_status(
@@ -194,7 +305,7 @@ def get_submission_status(
     return submission
 
 
-# ---------- Teacher: list submissions pending review ----------
+# ---------- Teacher: list submissions ----------
 @router.get("/{assignment_id}/submissions", response_model=List[SubmissionResponse])
 def list_submissions(
     assignment_id: int,
@@ -206,10 +317,11 @@ def list_submissions(
         raise HTTPException(404, "Assignment not found")
     get_course_for_access(assignment.course_id, current_user, db)
 
+    # Evaluate badges post-deadline if needed
+    evaluate_assignment_badges(assignment_id, db)
+
     submissions = db.query(Submission).filter(Submission.assignment_id == assignment_id).all()
 
-    # Attach student_name onto each ORM object before serialization —
-    # response_model reads it as a plain attribute, same as any column
     student_ids = [s.student_id for s in submissions]
     students = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(student_ids)).all()}
     for s in submissions:
@@ -218,7 +330,7 @@ def list_submissions(
     return submissions
 
 
-# ---------- Teacher: view AI's preliminary evaluation ----------
+# ---------- Teacher: view AI evaluation ----------
 @router.get("/submissions/{submission_id}/ai-evaluation", response_model=AIEvaluationResponse)
 def get_ai_evaluation(
     submission_id: int,
@@ -235,7 +347,7 @@ def get_ai_evaluation(
     return submission.ai_evaluation
 
 
-# ---------- Teacher: approve/override -> creates the FINAL grade ----------
+# ---------- Teacher: approve/override -> creates FINAL grade ----------
 @router.post("/submissions/{submission_id}/review", response_model=FinalGradeResponse)
 def review_submission(
     submission_id: int,
@@ -266,10 +378,13 @@ def review_submission(
     db.commit()
     db.refresh(final_grade)
 
+    # Trigger badge evaluation (High Achiever & Perfect Score)
+    evaluate_assignment_badges(submission.assignment_id, db)
+
     return final_grade
 
 
-# ---------- Student: view final grade (ONLY after teacher review) ----------
+# ---------- Student: view final grade ----------
 @router.get("/submissions/{submission_id}/grade")
 def get_final_grade(
     submission_id: int,
@@ -287,7 +402,6 @@ def get_final_grade(
 
     grade = submission.final_grade
 
-    # Include the AI feedback in the response so the student gets rich breakdown
     ai_feedback = None
     if submission.ai_evaluation:
         ai_feedback = submission.ai_evaluation.feedback
@@ -301,18 +415,13 @@ def get_final_grade(
         "ai_feedback": ai_feedback,
     }
 
+
 @router.get("/{assignment_id}/my-submission", response_model=SubmissionResponse)
 def get_my_submission(
     assignment_id: int,
     current_user: User = Depends(require_role("student")),
     db: Session = Depends(get_db),
 ):
-    """
-    Lets a student check whether they've already submitted to this
-    assignment, without needing to remember a submission_id from a
-    previous session. This is what makes grades/status persist across
-    page reloads instead of only existing right after upload.
-    """
     submission = db.query(Submission).filter(
         Submission.assignment_id == assignment_id,
         Submission.student_id == current_user.id,
@@ -321,6 +430,7 @@ def get_my_submission(
     if not submission:
         raise HTTPException(404, "No submission found")
     return submission
+
 
 @router.delete("/{assignment_id}")
 def delete_assignment(
@@ -334,9 +444,6 @@ def delete_assignment(
 
     get_course_for_access(assignment.course_id, current_user, db)
 
-    # Clean up submission files from disk before deleting DB rows —
-    # cascade="all, delete-orphan" on Assignment.submissions handles the
-    # DB side, but won't touch files sitting in uploads/
     for submission in assignment.submissions:
         if submission.file_path and os.path.exists(submission.file_path):
             os.remove(submission.file_path)
@@ -349,15 +456,13 @@ def delete_assignment(
 @router.get("/submissions/{submission_id}/file")
 def download_submission_file(
     submission_id: int,
-    current_user: User = Depends(get_current_user),  # was require_role("teacher")
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
         raise HTTPException(404, "Submission not found")
 
-    # Students can only access their own submission
-    # Teachers can access any submission in their assigned course
     if current_user.role == "student":
         if submission.student_id != current_user.id:
             raise HTTPException(403, "Not your submission")
@@ -374,19 +479,13 @@ def download_submission_file(
         media_type="application/pdf",
     )
 
+
 @router.delete("/submissions/{submission_id}")
 def delete_my_submission(
     submission_id: int,
     current_user: User = Depends(require_role("student")),
     db: Session = Depends(get_db),
 ):
-    """
-    Lets a student withdraw their own submission — but ONLY while the
-    assignment's deadline hasn't passed yet. Once locked, this matches
-    the same enforcement pattern as submit_assignment's late-rejection
-    check, so a student can't bypass the lock by deleting and resubmitting
-    after the deadline either.
-    """
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
         raise HTTPException(404, "Submission not found")

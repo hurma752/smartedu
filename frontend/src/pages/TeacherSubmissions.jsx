@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Layout, { PageShell, Btn } from "../components/Layout";
 import * as assignmentsApi from "../api/assignments";
-import { C, T } from "../theme";
+import BadgePill from "../components/BadgePill";
+import { C } from "../theme";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main page
@@ -21,12 +22,40 @@ export default function TeacherSubmissions() {
   const [saved,       setSaved]       = useState(false);
   const [loadingEval, setLoadingEval] = useState(false);
 
+  const [assignment,      setAssignment]      = useState(null);
+  const [badgesByStudent, setBadgesByStudent] = useState({});
+  const [history,         setHistory]         = useState([]);
+  const [showHistory,     setShowHistory]     = useState(false);
+  const [showExtendModal, setShowExtendModal] = useState(false);
+
   const loadSubmissions = useCallback(async () => {
     const { data } = await assignmentsApi.listSubmissions(assignmentId);
     setSubmissions(data);
   }, [assignmentId]);
 
-  useEffect(() => { loadSubmissions(); }, [loadSubmissions]);
+  const loadAssignmentExtras = useCallback(async () => {
+    try {
+      const { data } = await assignmentsApi.getAssignmentDetail(assignmentId);
+      setAssignment(data);
+    } catch { /* ignore */ }
+    try {
+      const { data } = await assignmentsApi.getAssignmentBadges(assignmentId);
+      const map = {};
+      for (const b of data) {
+        if (!map[b.student_id]) map[b.student_id] = [];
+        map[b.student_id].push(b);
+      }
+      setBadgesByStudent(map);
+    } catch { /* ignore */ }
+    try {
+      const { data } = await assignmentsApi.getDeadlineHistory(assignmentId);
+      setHistory(data);
+    } catch { /* ignore */ }
+  }, [assignmentId]);
+
+  useEffect(() => { loadSubmissions(); loadAssignmentExtras(); }, [loadSubmissions, loadAssignmentExtras]);
+
+  const isPastDeadline = assignment?.due_date && new Date() > new Date(assignment.due_date);
 
   // Poll while any submission is still processing
   useEffect(() => {
@@ -82,15 +111,33 @@ export default function TeacherSubmissions() {
   const pending   = submissions.filter((s) => s.status === "ai_evaluated").length;
   const failed    = submissions.filter((s) => s.status === "failed").length;
 
+  const handleExtended = () => {
+    setShowExtendModal(false);
+    loadAssignmentExtras();
+  };
+
   return (
     <Layout>
       <PageShell
-        title="Submission Review"
-        subtitle={`${submissions.length} submission${submissions.length !== 1 ? "s" : ""}`}
+        title={assignment?.title || "Submission Review"}
+        subtitle={
+          `${submissions.length} submission${submissions.length !== 1 ? "s" : ""}` +
+          (assignment?.due_date
+            ? ` · ${isPastDeadline ? "Closed" : "Due"} ${new Date(assignment.due_date).toLocaleString()}`
+            : "")
+        }
         action={
-          <Btn variant="ghost" onClick={() => navigate(-1)}>
-            <i className="ti ti-arrow-left" style={{ fontSize: "14px" }} />Back
-          </Btn>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <Btn variant="ghost" onClick={() => setShowHistory(true)}>
+              <i className="ti ti-history" style={{ fontSize: "14px" }} />History{history.length > 0 ? ` (${history.length})` : ""}
+            </Btn>
+            <Btn variant="ghost" onClick={() => setShowExtendModal(true)}>
+              <i className="ti ti-calendar-time" style={{ fontSize: "14px" }} />Extend Deadline
+            </Btn>
+            <Btn variant="ghost" onClick={() => navigate(-1)}>
+              <i className="ti ti-arrow-left" style={{ fontSize: "14px" }} />Back
+            </Btn>
+          </div>
         }
       >
         {/* ── Summary bar ── */}
@@ -122,6 +169,7 @@ export default function TeacherSubmissions() {
                 <StudentRow
                   key={s.id}
                   submission={s}
+                  badges={badgesByStudent[s.student_id] || []}
                   isSelected={selected?.id === s.id}
                   isLast={i === submissions.length - 1}
                   onClick={() => openReview(s)}
@@ -208,7 +256,6 @@ export default function TeacherSubmissions() {
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <ScoreCard
                       scores={scores}
-                      aiEval={aiEval}
                       totalScore={totalScore}
                       onScoreChange={handleScoreChange}
                       alreadyGraded={selected.status === "teacher_reviewed"}
@@ -237,9 +284,154 @@ export default function TeacherSubmissions() {
             <div style={{ display: "none" }} /> // grid only shows one column when !selected
           )}
         </div>
+
+        {showExtendModal && (
+          <ExtendDeadlineModal
+            assignmentId={assignmentId}
+            currentDueDate={assignment?.due_date}
+            onClose={() => setShowExtendModal(false)}
+            onExtended={handleExtended}
+          />
+        )}
+
+        {showHistory && (
+          <DeadlineHistoryModal history={history} onClose={() => setShowHistory(false)} />
+        )}
       </PageShell>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </Layout>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extend Deadline modal
+// ─────────────────────────────────────────────────────────────────────────────
+function toLocalInputValue(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function ModalOverlay({ children, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "440px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ExtendDeadlineModal({ assignmentId, currentDueDate, onClose, onExtended }) {
+  const [newDueDate, setNewDueDate] = useState(toLocalInputValue(currentDueDate));
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!newDueDate) { setError("Please choose a new due date."); return; }
+    setError("");
+    setSaving(true);
+    try {
+      await assignmentsApi.extendDeadline(assignmentId, new Date(newDueDate).toISOString(), reason || undefined);
+      onExtended();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Couldn't update the deadline.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary }}>Extend Deadline</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
+          <i className="ti ti-x" style={{ fontSize: "16px" }} />
+        </button>
+      </div>
+      <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+        {error && <InlineBanner variant="error">{error}</InlineBanner>}
+        {currentDueDate && (
+          <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
+            Current deadline: {new Date(currentDueDate).toLocaleString()}
+          </p>
+        )}
+        <div>
+          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>New due date & time</label>
+          <input
+            type="datetime-local"
+            value={newDueDate}
+            onChange={(e) => setNewDueDate(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none" }}
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>Reason <span style={{ fontWeight: "400", color: C.textMuted }}>(optional)</span></label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="e.g. Extended due to server downtime"
+            style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical" }}
+          />
+        </div>
+      </div>
+      <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{ padding: "9px 16px", borderRadius: "7px", border: "none", background: C.primary, color: "#fff", fontSize: "13px", fontWeight: "600", fontFamily: "inherit", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1, display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          <i className="ti ti-check" style={{ fontSize: "14px" }} />{saving ? "Saving…" : "Save deadline"}
+        </button>
+      </div>
+    </ModalOverlay>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deadline history modal
+// ─────────────────────────────────────────────────────────────────────────────
+function DeadlineHistoryModal({ history, onClose }) {
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary }}>Deadline Extension History</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
+          <i className="ti ti-x" style={{ fontSize: "16px" }} />
+        </button>
+      </div>
+      <div style={{ padding: history.length ? "8px 0" : "32px 20px", textAlign: history.length ? "left" : "center" }}>
+        {history.length === 0 ? (
+          <>
+            <i className="ti ti-clock-off" style={{ fontSize: "26px", color: C.border, display: "block", marginBottom: "8px" }} />
+            <p style={{ fontSize: "13px", color: C.textMuted, margin: 0 }}>No deadline changes yet.</p>
+          </>
+        ) : (
+          history.map((h, i) => (
+            <div key={h.id} style={{ padding: "12px 20px", borderBottom: i === history.length - 1 ? "none" : `1px solid ${C.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", marginBottom: "4px" }}>
+                <span style={{ color: C.textMuted, textDecoration: "line-through" }}>
+                  {h.previous_due_date ? new Date(h.previous_due_date).toLocaleString() : "No deadline"}
+                </span>
+                <i className="ti ti-arrow-right" style={{ fontSize: "12px", color: C.textMuted }} />
+                <span style={{ fontWeight: "600", color: C.textPrimary }}>{new Date(h.new_due_date).toLocaleString()}</span>
+              </div>
+              <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
+                By {h.updated_by} · {new Date(h.updated_at).toLocaleString()}
+              </p>
+              {h.reason && <p style={{ fontSize: "12px", color: C.textSecondary, margin: "4px 0 0" }}>"{h.reason}"</p>}
+            </div>
+          ))
+        )}
+      </div>
+    </ModalOverlay>
   );
 }
 
@@ -256,7 +448,7 @@ function SummaryChip({ icon, label, value, color, bg, border }) {
   );
 }
 
-function StudentRow({ submission: s, isSelected, isLast, onClick }) {
+function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick }) {
   const [hovered, setHovered] = useState(false);
 
   // CTA config per status
@@ -283,9 +475,14 @@ function StudentRow({ submission: s, isSelected, isLast, onClick }) {
       {/* Student name — clicking the name/row area also opens review */}
       <div onClick={!cta.disabled ? onClick : undefined}
         style={{ minWidth: 0, flex: 1, cursor: cta.disabled ? "default" : "pointer" }}>
-        <p style={{ fontSize: "13px", fontWeight: isSelected ? "600" : "500", color: C.textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {s.student_name || `Student #${s.student_id}`}
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
+          <p style={{ fontSize: "13px", fontWeight: isSelected ? "600" : "500", color: C.textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {s.student_name || `Student #${s.student_id}`}
+          </p>
+          {badges.map((b) => (
+            <BadgePill key={b.id} badge={b} size="sm" showTooltip={false} />
+          ))}
+        </div>
       </div>
 
       <StatusPill status={s.status} />
@@ -388,16 +585,7 @@ function OCRBlock({ text, confidence }) {
   );
 }
 
-function ScoreCard({ scores, aiEval, totalScore, onScoreChange, alreadyGraded }) {
-  // Build max marks lookup from aiEval criteria if available
-  const maxByKey = {};
-  try {
-    const fb = typeof aiEval.feedback === "string" ? JSON.parse(aiEval.feedback) : aiEval.feedback;
-    fb?.criteria_feedback?.forEach((cf) => {
-      // key may not match label exactly; best effort
-    });
-  } catch { /* ignore */ }
-
+function ScoreCard({ scores, totalScore, onScoreChange, alreadyGraded }) {
   return (
     <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
       <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
@@ -463,7 +651,7 @@ function CommentsCard({ value, onChange, alreadyGraded }) {
 }
 
 function AIFeedback({ eval_ }) {
-  let feedback = null;
+  let feedback;
   try {
     feedback = typeof eval_.feedback === "string" ? JSON.parse(eval_.feedback) : eval_.feedback;
   } catch {

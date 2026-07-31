@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
 from fastapi.responses import StreamingResponse
 
 from app.database.db import get_db, SessionLocal
@@ -9,7 +10,6 @@ from app.models.models import User, ChatHistory
 from app.utils.auth import get_current_user
 from app.services.rag_service import answer_question, answer_question_stream
 from app.routers.courses import get_course_for_access
-from app.database.db import get_db, SessionLocal
 
 router = APIRouter()
 
@@ -21,7 +21,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    sources: list[str]
+    sources: List[str]
+    intent: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None
 
 
 @router.post("/", response_model=ChatResponse)
@@ -35,7 +37,6 @@ def chat(
 
     get_course_for_access(request.course_id, current_user, db)
 
-    # Pass student_id and db so the hybrid pipeline can fetch LMS data
     result = answer_question(
         question=request.message,
         course_id=request.course_id,
@@ -53,7 +54,12 @@ def chat(
     ))
     db.commit()
 
-    return {"answer": result["answer"], "sources": result.get("sources", [])}
+    return {
+        "answer": result["answer"],
+        "sources": result.get("sources", []),
+        "intent": result.get("intent"),
+        "metrics": result.get("metrics"),
+    }
 
 
 @router.post("/stream")
@@ -67,8 +73,6 @@ def chat_stream(
 
     get_course_for_access(request.course_id, current_user, db)
 
-    # Capture these before db session is potentially closed by the time
-    # the streaming generator runs
     student_id = current_user.id
     course_id = request.course_id
     message = request.message
@@ -76,8 +80,6 @@ def chat_stream(
     def generate():
         full_answer = ""
         try:
-            # Streaming needs its own session — request session may be
-            # gone by the time the generator yields tokens
             stream_db = SessionLocal()
             try:
                 for token in answer_question_stream(message, course_id, student_id, stream_db):
@@ -89,7 +91,6 @@ def chat_stream(
             yield f"\n\n[Error: {str(e)}]"
             return
 
-        # Save to history using another fresh session
         history_db = SessionLocal()
         try:
             history_db.add(ChatHistory(
