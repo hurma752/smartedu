@@ -11,6 +11,7 @@ from app.models.models import User, Document
 from app.schemas.document import DocumentResponse
 from app.utils.auth import get_current_user, require_role
 from app.services.rag_service import ingest_document_task
+from app.services.engagement_service import log_event
 from app.rag.vector_store import delete_document_chunks
 from app.config import settings
 from app.routers.courses import get_course_for_access  # IMPORTANT FIX
@@ -105,6 +106,9 @@ def download_document(
     ).first()
     if not document or not os.path.exists(document.file_path):
         raise HTTPException(404, "File not found")
+
+    if current_user.role == "student":
+        log_event(current_user.id, course_id, "document_download", db)
 
     return FileResponse(document.file_path, filename=document.filename, media_type="application/pdf")
 

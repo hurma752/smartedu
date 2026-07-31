@@ -27,6 +27,8 @@ const TEACHER_COURSE_TABS = [
   { tab: "materials",   icon: "ti-file-text",       label: "Lectures"    },
   { tab: "assignments", icon: "ti-clipboard-list",   label: "Assignments" },
   { tab: "students",    icon: "ti-users",             label: "Students"    },
+  { tab: "attendance",  icon: "ti-calendar-event",     label: "Attendance"  },
+  { tab: "analytics",   icon: "ti-chart-line",         label: "Analytics"   },
 ];
 
 // Student course sub-nav tabs — mirrors StudentCourseDetail tabs

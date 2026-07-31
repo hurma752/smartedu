@@ -9,6 +9,7 @@ from app.database.db import get_db, SessionLocal
 from app.models.models import User, ChatHistory
 from app.utils.auth import get_current_user
 from app.services.rag_service import answer_question, answer_question_stream
+from app.services.engagement_service import log_event
 from app.routers.courses import get_course_for_access
 
 router = APIRouter()
@@ -53,6 +54,7 @@ def chat(
         message=result["answer"], role="assistant",
     ))
     db.commit()
+    log_event(current_user.id, request.course_id, "chat_message", db)
 
     return {
         "answer": result["answer"],
@@ -102,6 +104,7 @@ def chat_stream(
                 message=full_answer, role="assistant",
             ))
             history_db.commit()
+            log_event(student_id, course_id, "chat_message", history_db)
         finally:
             history_db.close()
 

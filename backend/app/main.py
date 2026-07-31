@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import ollama
 from app.config import settings
 from app.database.db import SessionLocal
-from app.routers import auth, admin, courses, documents, chat, password, assignments, badges
+from app.routers import auth, admin, courses, documents, chat, password, assignments, badges, attendance, analytics
 from app.services.badge_service import seed_default_achievements
 
 app = FastAPI(
@@ -29,6 +29,8 @@ app.include_router(documents.router, prefix="/api/documents", tags=["Documents"]
 app.include_router(chat.router, prefix="/api/chat", tags=["Chatbot"])
 app.include_router(assignments.router, prefix="/api/assignments", tags=["Assignments"])
 app.include_router(badges.router, prefix="/api/badges", tags=["Badges"])
+app.include_router(attendance.router, prefix="/api/attendance", tags=["Attendance"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 
 
 @app.on_event("startup")

@@ -205,3 +205,31 @@ def get_assignment_badges(assignment_id: int, db: Session) -> list[dict]:
             "earned_at": sa.earned_at,
         })
     return results
+
+def get_student_badges_for_course(student_id: int, course_id: int, db: Session) -> list[dict]:
+    """
+    Same shape as get_student_badges(), scoped to one course — used by the
+    teacher-facing per-student analytics view so a student's badges from
+    other courses don't bleed into this course's summary.
+    """
+    student_achs = db.query(StudentAchievement).filter(
+        StudentAchievement.student_id == student_id,
+        StudentAchievement.course_id == course_id,
+    ).order_by(StudentAchievement.earned_at.desc()).all()
+
+    results = []
+    for sa in student_achs:
+        ach = sa.achievement
+        asgn = sa.assignment
+        results.append({
+            "id": sa.id,
+            "code": ach.code,
+            "title": ach.title,
+            "description": ach.description,
+            "badge_icon": ach.badge_icon,
+            "color_scheme": ach.color_scheme,
+            "earned_at": sa.earned_at,
+            "assignment_id": sa.assignment_id,
+            "assignment_title": asgn.title if asgn else None,
+        })
+    return results

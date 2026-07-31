@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import Layout, { PageShell, Card, CardHeader, Btn, Alert } from "../components/Layout";
 import AssignmentsPanel from "../components/teacher/AssignmentsPanel";
+import AttendancePanel from "../components/teacher/AttendancePanel";
+import AnalyticsPanel from "../components/teacher/AnalyticsPanel";
 import * as documentsApi from "../api/documents";
 import * as coursesApi from "../api/courses";
 import { getErrorMessage } from "../utils/errorMessage";
@@ -102,7 +104,7 @@ export default function TeacherCourseDetail() {
   );
 
   // Tab label for the page title
-  const tabLabel = { materials: "Lectures", assignments: "Assignments", students: "Students" }[activeTab] || "Lectures";
+  const tabLabel = { materials: "Lectures", assignments: "Assignments", students: "Students", attendance: "Attendance", analytics: "Analytics" }[activeTab] || "Lectures";
 
   return (
     <Layout>
@@ -195,6 +197,16 @@ export default function TeacherCourseDetail() {
               )}
             </div>
           </Card>
+        )}
+
+        {/* ── Attendance tab ── */}
+        {activeTab === "attendance" && (
+          <AttendancePanel courseId={courseId} />
+        )}
+
+        {/* ── Analytics tab ── */}
+        {activeTab === "analytics" && (
+          <AnalyticsPanel courseId={courseId} />
         )}
       </PageShell>
     </Layout>

@@ -279,3 +279,77 @@ class AssignmentDeadlineHistory(Base):
 
     assignment = relationship("Assignment", back_populates="deadline_history")
     updater = relationship("User", foreign_keys=[updated_by])
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW: Module 3 — Attendance, Engagement & Performance Analytics
+# ══════════════════════════════════════════════════════════════════════
+
+class ClassSession(Base):
+    """A single class meeting for a course, created by the teacher when taking attendance."""
+    __tablename__ = "class_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_date = Column(DateTime, nullable=False)
+    topic = Column(String(255), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    course = relationship("Course")
+    attendance_records = relationship("AttendanceRecord", back_populates="session", cascade="all, delete-orphan")
+
+
+class AttendanceRecord(Base):
+    """One student's attendance status for one class session. Idempotent per (session, student)."""
+    __tablename__ = "attendance_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("class_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False)  # "present" | "absent" | "late"
+    marked_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    marked_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("ClassSession", back_populates="attendance_records")
+    student = relationship("User", foreign_keys=[student_id])
+
+    __table_args__ = (UniqueConstraint("session_id", "student_id", name="unique_session_attendance"),)
+
+
+class EngagementEvent(Base):
+    """
+    Lightweight engagement log — chatbot usage and material downloads.
+    Write-heavy, read by the analytics feature-extraction pipeline (see analytics_service.py).
+    No ondelete on student/course FKs, deliberately mirroring ChatHistory's audit-log convention.
+    """
+    __tablename__ = "engagement_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    event_type = Column(String(30), nullable=False)  # "chat_message" | "document_download"
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class StudentRiskAssessment(Base):
+    """
+    Latest computed at-risk assessment for a student in a course.
+    Recomputed on demand (teacher-triggered) or lazily when analytics are viewed — see analytics_service.py.
+    One row per (student, course); recompute updates the existing row rather than appending history.
+    """
+    __tablename__ = "student_risk_assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    risk_level = Column(String(20), nullable=False)      # "low" | "medium" | "high"
+    risk_score = Column(Float, nullable=False)           # 0.0–1.0 probability/heuristic score
+    contributing_factors = Column(JSON, nullable=True)    # {feature_name: value, ...} + top drivers
+    model_version = Column(String(50), nullable=False)   # e.g. "rf-v1" or "heuristic-fallback"
+    computed_at = Column(DateTime, server_default=func.now())
+
+    student = relationship("User", foreign_keys=[student_id])
+    course = relationship("Course")
+
+    __table_args__ = (UniqueConstraint("student_id", "course_id", name="unique_student_course_risk"),)
