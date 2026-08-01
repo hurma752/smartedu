@@ -55,6 +55,20 @@ def startup_tasks():
     except Exception as e:
         print(f"Achievement seeding failed: {e}")
 
+    # 3. Ensure database migrations (e.g. summary & confidence_level columns in plagiarism_reports)
+    try:
+        from sqlalchemy import text
+        from app.database.db import engine, Base
+        from app.models import models
+        Base.metadata.create_all(bind=engine)
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE plagiarism_reports ADD COLUMN IF NOT EXISTS summary TEXT;"))
+            conn.execute(text("ALTER TABLE plagiarism_reports ADD COLUMN IF NOT EXISTS confidence_level VARCHAR(20) DEFAULT 'high';"))
+            conn.commit()
+        print("Database schema synced.")
+    except Exception as e:
+        print(f"Startup DB migration note: {e}")
+
 
 @app.get("/")
 def root():

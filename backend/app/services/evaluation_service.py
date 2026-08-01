@@ -9,9 +9,10 @@ import json
 import re
 import os
 import ollama
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.services.ocr_service import extract_text_from_pdf
+from app.services.plagiarism_service import compute_plagiarism_report
 from app.models.models import Submission, AIEvaluation, Assignment, Rubric, RubricCriterion
 from app.config import settings
 
@@ -46,43 +47,58 @@ def _prepare_submission_text(text: str, max_chars: int = 8000) -> str:
 def evaluate_submission_task(submission_id: int, file_path: str, db_session_factory):
     db: Session = db_session_factory()
     try:
-        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        # Eager load assignment in a single joined query
+        submission = db.query(Submission).options(
+            joinedload(Submission.assignment)
+        ).filter(Submission.id == submission_id).first()
+
         if not submission:
             return
 
-        # ── Text extraction ──────────────────────────────────────────────
-        extraction = extract_text_from_pdf(file_path)
+        # ── Text extraction (Check existing cached text first) ───────────
+        if submission.extracted_text and submission.extracted_text.strip():
+            cleaned_text = submission.extracted_text
+        else:
+            extraction = extract_text_from_pdf(file_path)
 
-        if not extraction["text"].strip():
-            submission.status = "failed"
-            submission.error_message = "No text could be extracted from this PDF."
-            db.commit()
-            return
+            if not extraction["text"].strip():
+                submission.status = "failed"
+                submission.error_message = "No text could be extracted from this PDF."
+                db.commit()
+                return
 
-        cleaned_text = clean_extracted_text(extraction["text"])
-        submission.extracted_text = cleaned_text
-        submission.extraction_method = extraction["method"]
-        submission.extraction_confidence = (
-            round(extraction["confidence"]) if extraction["confidence"] is not None else None
-        )
-
-        if extraction["low_confidence"]:
-            submission.status = "failed"
-            submission.error_message = (
-                f"OCR confidence was too low ({extraction['confidence']:.0f}%) to reliably "
-                "evaluate this submission. Please ask the student to resubmit a clearer scan "
-                "or a typed document."
+            cleaned_text = clean_extracted_text(extraction["text"])
+            submission.extracted_text = cleaned_text
+            submission.extraction_method = extraction["method"]
+            submission.extraction_confidence = (
+                round(extraction["confidence"]) if extraction["confidence"] is not None else None
             )
-            db.commit()
-            return
 
-        submission.status = "extracted"
-        db.commit()
+            if extraction["low_confidence"]:
+                submission.status = "failed"
+                submission.error_message = (
+                    f"OCR confidence was too low ({extraction['confidence']:.0f}%) to reliably "
+                    "evaluate this submission. Please ask the student to resubmit a clearer scan "
+                    "or a typed document."
+                )
+                db.commit()
+                return
+
+            submission.status = "extracted"
+            db.commit()
+
+        # ── Plagiarism Detection ──────────────────────────────────────────
+        plagiarism_report = None
+        try:
+            plagiarism_report = compute_plagiarism_report(submission.id, db)
+        except Exception as p_err:
+            print(f"[EvaluationTask] Plagiarism computation error: {p_err}")
 
         # ── Load assignment + rubric ──────────────────────────────────────
-        assignment = db.query(Assignment).filter(
+        assignment = submission.assignment or db.query(Assignment).filter(
             Assignment.id == submission.assignment_id
         ).first()
+
         rubric = db.query(Rubric).filter(Rubric.id == assignment.rubric_id).first()
         criteria = db.query(RubricCriterion).filter(
             RubricCriterion.rubric_id == rubric.id
@@ -100,6 +116,17 @@ def evaluate_submission_task(submission_id: int, file_path: str, db_session_fact
 
         criteria_keys = ", ".join([f'"{c.key}": 0' for c in criteria])
 
+        plagiarism_notice_block = ""
+        if plagiarism_report and plagiarism_report.risk_level in ["medium", "high"]:
+            plagiarism_notice_block = (
+                f"\nPLAGIARISM & SIMILARITY NOTICE:\n"
+                f"A similarity score of {submission.plagiarism_score:.1f}% ({plagiarism_report.risk_level.upper()} risk) "
+                f"was detected compared to another submission in this course.\n"
+                f"Instructions for AI Evaluator:\n"
+                f"- Note any relevant academic integrity observations in your written summary if appropriate.\n"
+                f"- Do NOT automatically deduct marks or award zero solely based on this notice. Grade the content against rubric criteria fairly as the human teacher will review all plagiarism flags.\n"
+            )
+
         prompt = f"""You are an experienced academic lecturer evaluating a student assignment.
 Your goal is fair, balanced, and encouraging assessment — not to find every flaw.
 
@@ -113,7 +140,7 @@ RUBRIC CRITERIA (evaluate EACH one separately):
 
 STUDENT SUBMISSION (representative sample from the full document):
 {submission_excerpt}
-
+{plagiarism_notice_block}
 SCORING GUIDELINES — READ CAREFULLY:
 - Award FULL marks if the student has made a genuine, reasonable attempt at the criterion.
 - Award PARTIAL marks for work that is present but incomplete or lacking depth.
@@ -150,8 +177,8 @@ Respond with ONLY a valid JSON object, no other text before or after:
             messages=[{"role": "user", "content": prompt}],
             options={
                 "num_predict": 1000,
-                "num_ctx": 6144,
-                "temperature": 0.15,
+                "num_ctx": 4096,
+                "temperature": 0.10,
                 "num_thread": os.cpu_count(),
             },
         )

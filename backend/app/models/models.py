@@ -188,6 +188,29 @@ class Submission(Base):
     assignment = relationship("Assignment", back_populates="submissions")
     ai_evaluation = relationship("AIEvaluation", back_populates="submission", uselist=False, cascade="all, delete-orphan")
     final_grade = relationship("FinalGrade", back_populates="submission", uselist=False, cascade="all, delete-orphan")
+    plagiarism_report = relationship("PlagiarismReport", back_populates="submission", uselist=False, cascade="all, delete-orphan", foreign_keys="[PlagiarismReport.submission_id]")
+
+
+class PlagiarismReport(Base):
+    __tablename__ = "plagiarism_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    matched_submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="SET NULL"), nullable=True)
+    matched_student_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    similarity_score = Column(Float, nullable=False, default=0.0)
+    risk_level = Column(String(20), nullable=False, default="low")  # "low", "medium", "high"
+    confidence_level = Column(String(20), nullable=False, default="high")  # "low", "medium", "high"
+    tfidf_score = Column(Float, nullable=True)
+    shingle_score = Column(Float, nullable=True)
+    semantic_score = Column(Float, nullable=True)
+    matching_spans = Column(JSON, nullable=True)  # List of matched excerpts and offsets
+    summary = Column(Text, nullable=True)  # Human-readable AI summary of plagiarism findings
+    created_at = Column(DateTime, server_default=func.now())
+
+    submission = relationship("Submission", foreign_keys=[submission_id], back_populates="plagiarism_report")
+    matched_submission = relationship("Submission", foreign_keys=[matched_submission_id])
+    matched_student = relationship("User", foreign_keys=[matched_student_id])
 
 
 class AIEvaluation(Base):

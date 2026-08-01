@@ -21,8 +21,9 @@ from app.services.cache_service import lms_context_cache
 from app.config import settings
 from app.models.models import (
     User, Assignment, Submission, AIEvaluation, FinalGrade, Enrollment,
-    Rubric, RubricCriterion, AssignmentDeadlineHistory
+    Rubric, RubricCriterion, AssignmentDeadlineHistory, PlagiarismReport, StudentAchievement
 )
+from app.services.plagiarism_service import compute_plagiarism_report, recompute_assignment_plagiarism
 
 router = APIRouter()
 
@@ -444,13 +445,42 @@ def delete_assignment(
 
     get_course_for_access(assignment.course_id, current_user, db)
 
+    submission_ids = [s.id for s in assignment.submissions]
+
+    # Delete achievements and deadline history referencing this assignment
+    db.query(StudentAchievement).filter(StudentAchievement.assignment_id == assignment_id).delete(synchronize_session=False)
+    db.query(AssignmentDeadlineHistory).filter(AssignmentDeadlineHistory.assignment_id == assignment_id).delete(synchronize_session=False)
+
+    if submission_ids:
+        # Nullify foreign key references in other plagiarism reports pointing to these submissions
+        db.query(PlagiarismReport).filter(
+            PlagiarismReport.matched_submission_id.in_(submission_ids)
+        ).update({"matched_submission_id": None, "matched_student_id": None}, synchronize_session=False)
+
     for submission in assignment.submissions:
         if submission.file_path and os.path.exists(submission.file_path):
-            os.remove(submission.file_path)
+            try:
+                os.remove(submission.file_path)
+            except Exception:
+                pass
+
+    rubric_id = assignment.rubric_id
 
     db.delete(assignment)
     db.commit()
+
+    # Clean orphaned rubric if no other assignment references it
+    if rubric_id:
+        other_assignment = db.query(Assignment).filter(Assignment.rubric_id == rubric_id).first()
+        if not other_assignment:
+            rubric = db.query(Rubric).filter(Rubric.id == rubric_id).first()
+            if rubric:
+                db.delete(rubric)
+                db.commit()
+
+    lms_context_cache.clear()
     return {"message": "Assignment deleted"}
+
 
 
 @router.get("/submissions/{submission_id}/file")
@@ -510,3 +540,82 @@ def delete_my_submission(
     db.delete(submission)
     db.commit()
     return {"message": "Submission deleted. You may resubmit before the deadline."}
+
+
+@router.get("/submissions/{submission_id}/plagiarism")
+def get_plagiarism_report(
+    submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+
+    if current_user.role == "student" and submission.student_id != current_user.id:
+        raise HTTPException(403, "Access denied")
+    elif current_user.role == "teacher":
+        get_course_for_access(submission.assignment.course_id, current_user, db)
+
+    report = db.query(PlagiarismReport).filter(PlagiarismReport.submission_id == submission_id).first()
+
+    # Recompute if report missing or lacks narrative summary
+    if (not report or not report.summary or "Similarity score of" in report.summary) and submission.extracted_text:
+        report = compute_plagiarism_report(submission_id, db)
+
+    if not report:
+        return {
+            "submission_id": submission_id,
+            "similarity_score": 0.0,
+            "percentage_score": 0.0,
+            "risk_level": "low",
+            "confidence_level": "high",
+            "detection_status": submission.detection_status or "not_checked",
+            "summary": "Low similarity (0.0%). Content appears to be original student work with no significant plagiarism detected.",
+            "tfidf_score": 0.0,
+            "shingle_score": 0.0,
+            "semantic_score": 0.0,
+            "matching_spans": [],
+            "matched_student_name": None,
+            "matched_submission_id": None,
+        }
+
+    matched_student_name = None
+    if report.matched_student_id:
+        student_user = db.query(User).filter(User.id == report.matched_student_id).first()
+        if student_user:
+            matched_student_name = student_user.full_name
+
+    return {
+        "id": report.id,
+        "submission_id": report.submission_id,
+        "matched_submission_id": report.matched_submission_id,
+        "matched_student_id": report.matched_student_id,
+        "matched_student_name": matched_student_name,
+        "similarity_score": report.similarity_score,
+        "percentage_score": round(report.similarity_score * 100.0, 1),
+        "risk_level": report.risk_level,
+        "confidence_level": getattr(report, "confidence_level", "medium") or "medium",
+        "summary": report.summary or f"Similarity score of {round(report.similarity_score * 100.0, 1)}% ({report.risk_level} risk).",
+        "tfidf_score": report.tfidf_score,
+        "shingle_score": report.shingle_score,
+        "semantic_score": report.semantic_score,
+        "matching_spans": report.matching_spans or [],
+        "created_at": report.created_at,
+    }
+
+
+@router.post("/{assignment_id}/plagiarism/recompute")
+def recompute_plagiarism_endpoint(
+    assignment_id: int,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
+
+    get_course_for_access(assignment.course_id, current_user, db)
+
+    result = recompute_assignment_plagiarism(assignment_id, db)
+    return result
