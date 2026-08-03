@@ -187,6 +187,31 @@ export default function StudentCourseDetail() {
               <div ref={endRef} style={{ height: "20px" }} />
             </div>
 
+            {/* Suggestion Chips */}
+            {messages.length <= 2 && !chatting && (
+              <div style={{ padding: "0 20px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {[
+                  "Summarize available lectures",
+                  "List all lecture titles",
+                  "What assignments are due?",
+                  "How is plagiarism evaluated?"
+                ].map((chip) => (
+                  <button
+                    key={chip}
+                    onClick={() => { setInput(chip); }}
+                    className="btn-interactive"
+                    style={{
+                      background: C.subtleBg, border: `1px solid ${C.border}`,
+                      borderRadius: "16px", padding: "6px 12px", fontSize: "12px",
+                      color: C.textSecondary, cursor: "pointer", fontFamily: "inherit"
+                    }}
+                  >
+                    💡 {chip}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Input row */}
             <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", gap: "10px", alignItems: "center" }}>
               <input

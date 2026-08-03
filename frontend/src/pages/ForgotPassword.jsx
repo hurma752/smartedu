@@ -73,7 +73,7 @@ export default function ForgotPassword() {
                   />
                 </div>
 
-                <button type="submit" disabled={loading}
+                <button type="submit" disabled={loading} className="btn-interactive"
                   style={{ width: "100%", background: loading ? "#555" : C.primary, color: "#fff", border: "none", borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600", fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "9px", marginBottom: "16px" }}>
                   {loading
                     ? <><i className="ti ti-loader-2" style={{ fontSize: "17px", animation: "spin 1s linear infinite" }} />Sending…</>

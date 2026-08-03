@@ -381,7 +381,7 @@ function SbBtn({ icon, label, iconOnly, danger, onClick }) {
 
 export function PageShell({ title, subtitle, action, children }) {
   return (
-    <div style={{ padding: "clamp(20px, 4vw, 40px) clamp(16px, 4vw, 40px)", maxWidth: "1200px", width: "100%" }}>
+    <div className="animate-fade-in" style={{ padding: "clamp(20px, 4vw, 40px) clamp(16px, 4vw, 40px)", maxWidth: "1200px", width: "100%" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "28px", gap: "16px", flexWrap: "wrap" }}>
         <div>
           <h1 style={{ ...T.pageTitle, color: C.textPrimary, margin: 0 }}>{title}</h1>
@@ -394,9 +394,9 @@ export function PageShell({ title, subtitle, action, children }) {
   );
 }
 
-export function Card({ children, style = {} }) {
+export function Card({ children, style = {}, elevate = false }) {
   return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, ...style }}>
+    <div className={elevate ? "card-hover-elevate" : ""} style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, ...style }}>
       {children}
     </div>
   );
@@ -430,8 +430,8 @@ export function Btn({ children, onClick, variant = "primary", size = "md", disab
     ghost:     { background: "transparent",color: C.textSecondary, border: `1px solid ${C.border}` },
   };
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
-      style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: "600", fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, letterSpacing: "0.01em", ...sizes[size], ...(variants[variant] || variants.primary), ...style }}>
+    <button type={type} onClick={onClick} disabled={disabled} className="btn-interactive"
+      style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: "600", fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, letterSpacing: "0.01em", transition: "all 0.15s ease", ...sizes[size], ...(variants[variant] || variants.primary), ...style }}>
       {children}
     </button>
   );

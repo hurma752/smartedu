@@ -44,7 +44,7 @@ export default function AdminDashboard() {
         {/* ── Stat cards — left border accent, editorial style ── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "36px" }}>
           {stats.map(({ label, value, sub, accent }) => (
-            <div key={label} style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, borderLeft: `4px solid ${accent}`, padding: "20px 20px 18px" }}>
+            <div key={label} className="card-hover-elevate" style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, borderLeft: `4px solid ${accent}`, padding: "20px 20px 18px" }}>
               <p style={{ ...T.statLabel, color: C.textMuted, margin: "0 0 10px" }}>{label}</p>
               <p style={{ ...T.statValue, color: C.textPrimary, margin: "0 0 4px" }}>
                 {loading ? "—" : value}

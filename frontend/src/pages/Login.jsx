@@ -33,7 +33,7 @@ export default function Login() {
       {/* Subtle dark overlay so text reads well over the bg */}
       <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.18)", pointerEvents: "none" }} />
 
-      <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: "12px", width: "100%", maxWidth: "420px", position: "relative", zIndex: 1, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+      <div className="animate-slide-up" style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: "12px", width: "100%", maxWidth: "420px", position: "relative", zIndex: 1, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 
         {/* Red top accent stripe */}
         <div style={{ height: "4px", background: C.accent }} />
@@ -85,7 +85,7 @@ export default function Login() {
               </Link>
             </div>
 
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading} className="btn-interactive"
               style={{ width: "100%", background: loading ? "#555" : C.primary, color: "#fff", border: "none", borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600", fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "9px", letterSpacing: "0.01em" }}>
               {loading
                 ? <><i className="ti ti-loader-2" style={{ fontSize: "17px", animation: "spin 1s linear infinite" }} />Signing in…</>

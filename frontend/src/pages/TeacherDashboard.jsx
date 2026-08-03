@@ -50,25 +50,26 @@ export default function TeacherDashboard() {
 
         {/* ── Stat bar ── */}
         {!loading && courses.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "14px", marginBottom: "32px" }}>
-            <StatCard label="Assigned courses" value={courses.length}  accent={C.statCourses}  />
-            <StatCard label="Total students"   value={totalStudents}   accent={C.statStudents} />
+          <div className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "16px", marginBottom: "32px" }}>
+            <StatCard label="Assigned courses" value={courses.length}  accent={C.statCourses} icon="ti-books" />
+            <StatCard label="Total students"   value={totalStudents}   accent={C.statStudents} icon="ti-users" />
           </div>
         )}
 
         {/* ── Course list ── */}
         {loading ? (
-          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "48px", textAlign: "center", color: C.textMuted, fontSize: "14px" }}>
-            Loading…
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div className="skeleton-shimmer" style={{ height: "72px", width: "100%" }} />
+            <div className="skeleton-shimmer" style={{ height: "72px", width: "100%" }} />
           </div>
         ) : courses.length === 0 ? (
-          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "56px 32px", textAlign: "center" }}>
+          <div className="animate-fade-in" style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "56px 32px", textAlign: "center" }}>
             <i className="ti ti-books" style={{ fontSize: "36px", color: C.border, display: "block", marginBottom: "14px" }} />
             <p style={{ fontSize: "15px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>No courses assigned</p>
             <p style={{ fontSize: "14px", color: C.textMuted }}>Contact an admin to get assigned to a course.</p>
           </div>
         ) : (
-          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+          <div className="animate-fade-in" style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
             {courses.map((course, i) => (
               <CourseRow
                 key={course.id}
@@ -84,10 +85,13 @@ export default function TeacherDashboard() {
   );
 }
 
-function StatCard({ label, value, accent }) {
+function StatCard({ label, value, accent, icon }) {
   return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, borderLeft: `4px solid ${accent}`, padding: "20px 20px 18px" }}>
-      <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: C.textMuted, margin: "0 0 10px" }}>{label}</p>
+    <div className="card-hover-elevate" style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, borderLeft: `4px solid ${accent}`, padding: "20px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+        <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.07em", textTransform: "uppercase", color: C.textMuted, margin: 0 }}>{label}</p>
+        <i className={`ti ${icon}`} style={{ fontSize: "18px", color: C.textMuted }} />
+      </div>
       <p style={{ fontSize: "32px", fontWeight: "700", letterSpacing: "-0.04em", lineHeight: 1, color: C.textPrimary, margin: 0 }}>{value}</p>
     </div>
   );
@@ -100,7 +104,7 @@ function CourseRow({ course, last, onClick }) {
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, cursor: "pointer", transition: "background 0.12s", gap: "16px" }}
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, cursor: "pointer", transition: "all 0.15s ease", gap: "16px" }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "14px", minWidth: 0, flex: 1 }}>
         <span style={{ fontSize: "11px", fontWeight: "700", color: C.accentText, background: C.accentTint, padding: "4px 8px", borderRadius: "5px", letterSpacing: "0.04em", flexShrink: 0 }}>
@@ -113,7 +117,7 @@ function CourseRow({ course, last, onClick }) {
           )}
         </div>
       </div>
-      <i className="ti ti-arrow-right" style={{ fontSize: "16px", color: hovered ? C.accent : C.textMuted, transition: "color 0.12s", flexShrink: 0 }} />
+      <i className="ti ti-arrow-right" style={{ fontSize: "16px", color: hovered ? C.accent : C.textMuted, transform: hovered ? "translateX(3px)" : "none", transition: "all 0.15s ease", flexShrink: 0 }} />
     </div>
   );
 }

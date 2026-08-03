@@ -208,6 +208,15 @@ export default function TeacherSubmissions() {
               {error && <InlineBanner variant="error">{error}</InlineBanner>}
               {saved  && <InlineBanner variant="success">Grade saved successfully.</InlineBanner>}
 
+              {/* Plagiarism Analysis Card */}
+              {selected.status !== "failed" && selected.status !== "processing" && (
+                <PlagiarismCard
+                  submissionId={selected.id}
+                  assignmentId={assignmentId}
+                  onRecomputed={loadSubmissions}
+                />
+              )}
+
               {/* OCR text */}
               {selected.extracted_text && selected.extraction_method === "ocr" && (
                 <OCRBlock
@@ -485,6 +494,19 @@ function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick })
         </div>
       </div>
 
+      {/* Plagiarism Badge */}
+      {s.plagiarism_score !== null && s.plagiarism_score !== undefined && s.plagiarism_score > 0 && (
+        <span style={{
+          fontSize: "11px", fontWeight: "600", padding: "2px 6px", borderRadius: "12px",
+          background: s.plagiarism_score >= 40 ? C.dangerBg : s.plagiarism_score >= 15 ? C.warningBg : C.successBg,
+          color: s.plagiarism_score >= 40 ? C.dangerText : s.plagiarism_score >= 15 ? C.warningText : C.successText,
+          border: `1px solid ${s.plagiarism_score >= 40 ? C.dangerBorder : s.plagiarism_score >= 15 ? C.warningBorder : C.successBorder}`,
+          whiteSpace: "nowrap"
+        }}>
+          {s.plagiarism_score.toFixed(0)}% sim
+        </span>
+      )}
+
       <StatusPill status={s.status} />
 
       {/* Explicit CTA button — the key UX improvement */}
@@ -725,3 +747,172 @@ function AIFeedback({ eval_ }) {
     </div>
   );
 }
+
+function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [recomputing, setRecomputing] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [showDebug, setShowDebug] = useState(false);
+
+  const fetchReport = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const { data } = await assignmentsApi.getPlagiarismReport(submissionId);
+      setReport(data);
+    } catch {
+      setError("Could not load plagiarism report.");
+    } finally {
+      setLoading(false);
+    }
+  }, [submissionId]);
+
+  useEffect(() => {
+    fetchReport();
+  }, [fetchReport]);
+
+  const handleRecompute = async () => {
+    setRecomputing(true);
+    try {
+      await assignmentsApi.recomputePlagiarism(assignmentId);
+      await fetchReport();
+      if (onRecomputed) onRecomputed();
+    } catch {
+      alert("Failed to recompute plagiarism.");
+    } finally {
+      setRecomputing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "16px", textAlign: "center" }}>
+        <i className="ti ti-loader-2" style={{ fontSize: "20px", color: C.textMuted, animation: "spin 1s linear infinite" }} />
+      </div>
+    );
+  }
+
+  if (error || !report) return null;
+
+  const riskColor = report.risk_level === "high" ? C.dangerText : report.risk_level === "medium" ? C.warningText : C.successText;
+  const riskBg = report.risk_level === "high" ? C.dangerBg : report.risk_level === "medium" ? C.warningBg : C.successBg;
+  const riskBorder = report.risk_level === "high" ? C.dangerBorder : report.risk_level === "medium" ? C.warningBorder : C.successBorder;
+
+  const confLevel = report.confidence_level || "medium";
+  const confColor = confLevel === "high" ? C.textPrimary : confLevel === "medium" ? C.textSecondary : C.textMuted;
+  const confBg = C.subtleBg;
+
+  return (
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+      {/* Header Bar */}
+      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+          <i className="ti ti-shield-check" style={{ fontSize: "16px", color: riskColor }} />
+          <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Plagiarism Analysis</span>
+          {/* Risk Level Badge & Plagiarism Percentage */}
+          <span style={{ fontSize: "11px", fontWeight: "700", padding: "3px 8px", borderRadius: "20px", background: riskBg, color: riskColor, border: `1px solid ${riskBorder}` }}>
+            {report.risk_level.toUpperCase()} RISK ({report.percentage_score}%)
+          </span>
+          {/* Confidence Level Badge */}
+          <span style={{ fontSize: "10px", fontWeight: "600", padding: "2px 7px", borderRadius: "20px", background: confBg, color: confColor, border: `1px solid ${C.border}` }} title="Confidence level based on direct text evidence vs semantic similarity">
+            {confLevel.toUpperCase()} CONFIDENCE
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: "6px" }}>
+          {/* Debug view toggle for developers/admins */}
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: "5px", padding: "4px 7px", fontSize: "10px", fontWeight: "500", color: C.textMuted, cursor: "pointer" }}
+            title="Toggle Technical Engine Metrics (TF-IDF, Shingles, Vectors)"
+          >
+            {showDebug ? "Hide Debug" : "Debug Info"}
+          </button>
+          <button
+            onClick={handleRecompute}
+            disabled={recomputing}
+            style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: "5px", padding: "4px 8px", fontSize: "11px", fontWeight: "500", color: C.textSecondary, cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+          >
+            <i className={`ti ${recomputing ? "ti-loader-2" : "ti-refresh"}`} style={{ fontSize: "12px", animation: recomputing ? "spin 1s linear infinite" : "none" }} />
+            {recomputing ? "Recomputing…" : "Recompute"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        {/* Teacher Guidance Banner */}
+        <div style={{ background: C.infoBg, border: `1px solid ${C.infoBorder}`, borderRadius: "6px", padding: "9px 12px", display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: C.infoText }}>
+          <i className="ti ti-info-circle" style={{ flexShrink: 0, fontSize: "15px" }} />
+          <span><strong>Teacher Guidance:</strong> Similarity findings inform grading but do not mandate penalty. Evaluate mastery & originality directly.</span>
+        </div>
+
+        {/* AI-generated Plagiarism Summary */}
+        {report.summary && (
+          <div style={{ background: C.subtleBg, borderRadius: "6px", padding: "10px 12px", border: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: "12px", color: C.textPrimary, margin: 0, lineHeight: "1.5" }}>
+              <i className="ti ti-sparkles" style={{ marginRight: "6px", color: C.infoText }} />
+              <strong>AI Summary:</strong> {report.summary}
+            </p>
+          </div>
+        )}
+
+        {/* Matched Student */}
+        <div style={{ background: "#FAFBFD", padding: "10px 12px", borderRadius: "6px", border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: "11px", color: C.textMuted, fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>Matched Student</span>
+          <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary }}>
+            {report.matched_student_name || "Original Work"}
+          </span>
+        </div>
+
+        {/* Optional Developer / Debug View */}
+        {showDebug && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", padding: "8px", background: "#F8FAFC", borderRadius: "6px", border: `1px dashed ${C.border}` }}>
+            <div style={{ textAlign: "center" }}>
+              <span style={{ display: "block", fontSize: "9px", color: C.textMuted, fontWeight: "600" }}>TF-IDF COSINE</span>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>{Math.round((report.tfidf_score || 0) * 100)}%</span>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <span style={{ display: "block", fontSize: "9px", color: C.textMuted, fontWeight: "600" }}>SHINGLE OVERLAP</span>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>{Math.round((report.shingle_score || 0) * 100)}%</span>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <span style={{ display: "block", fontSize: "9px", color: C.textMuted, fontWeight: "600" }}>SEMANTIC VECTOR</span>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>{Math.round((report.semantic_score || 0) * 100)}%</span>
+            </div>
+          </div>
+        )}
+
+        {/* Highlighted Matching Text Evidence */}
+        {report.matching_spans && report.matching_spans.length > 0 ? (
+          <div style={{ marginTop: "4px" }}>
+            <button
+              onClick={() => setExpanded(!expanded)}
+              style={{ width: "100%", background: "none", border: `1px solid ${C.border}`, borderRadius: "6px", padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontSize: "12px", color: C.textPrimary, fontWeight: "600" }}
+            >
+              <span><i className="ti ti-highlight" style={{ marginRight: "6px", color: C.warningText }} />{report.matching_spans.length} Highlighted Matching Text Section{report.matching_spans.length > 1 ? "s" : ""}</span>
+              <i className={`ti ${expanded ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "13px" }} />
+            </button>
+            {expanded && (
+              <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" }}>
+                {report.matching_spans.map((span, idx) => (
+                  <div key={idx} style={{ background: "#FFFBEB", border: `1px solid ${C.warningBorder}`, borderRadius: "6px", padding: "9px 12px", fontSize: "12px", color: C.textPrimary }}>
+                    <p style={{ margin: 0, fontStyle: "italic", lineHeight: "1.4", wordBreak: "break-word" }}>"{span.text}"</p>
+                    <span style={{ fontSize: "10px", color: C.textMuted, display: "block", marginTop: "4px" }}>
+                      Matching section length: {span.length} characters (Position {span.source_start}–{span.source_end})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ background: "#F8FAFC", border: `1px dashed ${C.border}`, borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: C.textMuted, lineHeight: "1.4" }}>
+            <i className="ti ti-info-circle" style={{ marginRight: "6px", color: C.textSecondary }} />
+            No direct matching passages were found. Similarity score is based primarily on semantic analysis.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

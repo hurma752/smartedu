@@ -76,3 +76,9 @@ export const deleteMySubmission = (submissionId) =>
 
 export const getAssignmentRubric = (assignmentId) =>
   client.get(`/assignments/${assignmentId}/rubric`);
+
+export const getPlagiarismReport = (submissionId) =>
+  client.get(`/assignments/submissions/${submissionId}/plagiarism`);
+
+export const recomputePlagiarism = (assignmentId) =>
+  client.post(`/assignments/${assignmentId}/plagiarism/recompute`);
