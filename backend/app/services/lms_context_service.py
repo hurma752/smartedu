@@ -106,7 +106,9 @@ def build_lms_context(course_id: int, student_id: int, db: Session) -> str:
         for idx, doc in enumerate(documents, 1):
             lbl = ORDINAL_LABELS[idx - 1] if idx <= len(ORDINAL_LABELS) else f"{idx}th"
             latest = " [Latest Upload]" if idx == len(documents) else ""
-            lines.append(f" - Lecture {idx} ({lbl} Lecture{latest}): {doc.filename}")
+            base_name = doc.filename.rsplit(".", 1)[0]
+            clean_title = base_name.replace("_", " ").replace("-", " ").title()
+            lines.append(f" - Lecture {idx} ({lbl} Lecture{latest}): Title: \"{clean_title}\" (Filename: {doc.filename})")
 
     if not assignments:
         lines.append("[Assignments] Total: 0")

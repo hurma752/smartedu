@@ -24,12 +24,15 @@ from app.config import settings
 from app.services.ocr_service import extract_text_from_pdf, chunk_text
 
 
-SYSTEM_PROMPT = """You are SmartEdu, an AI academic assistant for this LMS.
-RULES:
-1. Assignment statuses MUST come strictly from the LMS CONTEXT section.
-2. If a submission record exists, the assignment is NOT pending/overdue.
-3. Always trust LMS CONTEXT over prior chat history for dates, counts, and grades.
-4. Never invent facts. Be concise, direct, and helpful."""
+from typing import Optional, Dict, Any, List
+
+SYSTEM_PROMPT = """You are SmartEdu, an AI academic assistant for this LMS course.
+RULES & DIRECTIVES:
+1. Always maintain conversational continuity with prior chat history.
+2. If asked to list, name, or identify lectures (e.g., 'Can you name them?', 'List lecture titles'), provide the exact list of lecture titles from the LMS CONTEXT section.
+3. Assignment statuses, due dates, and grades MUST come strictly from LMS CONTEXT.
+4. If a user asks about a specific lecture (e.g., 'What is Lecture 1 about?'), use both the LMS CONTEXT and the relevant course material excerpts.
+5. Never invent facts or hallucinate lecture names. Be clear, precise, direct, and well-formatted."""
 
 ORDINAL_MAP = {
     "first": 1, "1st": 1, "one": 1, "1": 1, "01": 1,
@@ -48,7 +51,7 @@ ORDINAL_MAP = {
 def resolve_lecture_ordinal(question: str, course_id: int, db: Session):
     """
     Parses ordinal references like 'Lecture 1', 'first lecture', '2nd lecture', 'latest lecture'
-    and maps them to the corresponding Document object ordered by created_at.
+    or topic keywords and maps them to the corresponding Document object ordered by created_at.
     Returns (Document or None, target_index or None).
     """
     if not question:
@@ -91,6 +94,13 @@ def resolve_lecture_ordinal(question: str, course_id: int, db: Session):
             return documents[target_idx - 1], target_idx
         else:
             return None, target_idx
+
+    # Pattern 3: Topic / Title keyword matching e.g. "which lecture discusses Digital Twins?"
+    for idx, doc in enumerate(documents, 1):
+        filename_clean = doc.filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").lower()
+        terms = [t for t in filename_clean.split() if len(t) > 3]
+        if any(t in q_lower for t in terms):
+            return doc, idx
 
     return None, None
 
@@ -142,14 +152,20 @@ def ingest_document_task(document_id: int, file_path: str, course_id: int, db_se
         db.close()
 
 
-def answer_question(question: str, course_id: int, student_id: int, db: Session) -> dict:
-    """Synchronous answer question pipeline with response caching, ordinal resolution, and telemetry."""
+def answer_question(
+    question: str,
+    course_id: int,
+    student_id: int,
+    db: Session,
+    history: Optional[List[Dict[str, str]]] = None,
+) -> dict:
+    """Synchronous answer question pipeline with response caching, ordinal resolution, history, and telemetry."""
     metrics = PipelineMetrics()
     norm_q = normalize_query(question)
 
     # 1. Response Cache Check
     cached_res = response_cache.get((course_id, student_id, norm_q))
-    if cached_res is not None:
+    if cached_res is not None and not history:
         metrics.cached = True
         metrics.finish()
         metrics.log(question, cached_res.get("intent", "cached"))
@@ -200,7 +216,7 @@ def answer_question(question: str, course_id: int, student_id: int, db: Session)
             "metrics": metrics.to_dict(),
         }
 
-    # 5. Prompt Construction
+    # 5. Prompt Construction with Conversation Memory
     t0 = time.perf_counter()
     prompt_parts = [SYSTEM_PROMPT, ""]
 
@@ -216,15 +232,23 @@ def answer_question(question: str, course_id: int, student_id: int, db: Session)
             prompt_parts.append(f"[{i}]: {chunk[:450]}")
         prompt_parts.append("")
 
-    prompt_parts.append(f"QUESTION: {question}\nANSWER:")
-    prompt = "\n".join(prompt_parts)
+    system_content = "\n".join(prompt_parts)
+
+    ollama_messages = [{"role": "system", "content": system_content}]
+
+    if history:
+        for item in history:
+            r = "assistant" if item.get("role") == "assistant" else "user"
+            ollama_messages.append({"role": r, "content": item.get("message", "")})
+
+    ollama_messages.append({"role": "user", "content": question})
     metrics.mark_prompt(time.perf_counter() - t0)
 
     # 6. LLM Inference
     t_llm_start = time.perf_counter()
     response = ollama.chat(
         model=settings.OLLAMA_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=ollama_messages,
         options={
             "num_predict": 400,
             "num_ctx": 2048,
@@ -247,19 +271,26 @@ def answer_question(question: str, course_id: int, student_id: int, db: Session)
         "metrics": metrics.to_dict(),
     }
 
-    response_cache.set((course_id, student_id, norm_q), result, ttl=300)
+    if not history:
+        response_cache.set((course_id, student_id, norm_q), result, ttl=300)
     metrics.log(question, intent)
 
     return result
 
 
-def answer_question_stream(question: str, course_id: int, student_id: int, db: Session):
-    """Streaming answer pipeline with ordinal lecture resolution."""
+def answer_question_stream(
+    question: str,
+    course_id: int,
+    student_id: int,
+    db: Session,
+    history: Optional[List[Dict[str, str]]] = None,
+):
+    """Streaming answer pipeline with ordinal lecture resolution and conversation memory."""
     metrics = PipelineMetrics()
     norm_q = normalize_query(question)
 
     cached_res = response_cache.get((course_id, student_id, norm_q))
-    if cached_res is not None:
+    if cached_res is not None and not history:
         metrics.cached = True
         metrics.finish()
         metrics.log(question, cached_res.get("intent", "cached"))
@@ -317,15 +348,23 @@ def answer_question_stream(question: str, course_id: int, student_id: int, db: S
             prompt_parts.append(f"[{i}]: {chunk[:450]}")
         prompt_parts.append("")
 
-    prompt_parts.append(f"QUESTION: {question}\nANSWER:")
-    prompt = "\n".join(prompt_parts)
+    system_content = "\n".join(prompt_parts)
+
+    ollama_messages = [{"role": "system", "content": system_content}]
+
+    if history:
+        for item in history:
+            r = "assistant" if item.get("role") == "assistant" else "user"
+            ollama_messages.append({"role": r, "content": item.get("message", "")})
+
+    ollama_messages.append({"role": "user", "content": question})
     metrics.mark_prompt(time.perf_counter() - t0)
 
     # Stream Generation
     t_llm_start = time.perf_counter()
     stream = ollama.chat(
         model=settings.OLLAMA_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=ollama_messages,
         stream=True,
         options={
             "num_predict": 400,
@@ -365,4 +404,5 @@ def answer_question_stream(question: str, course_id: int, student_id: int, db: S
         "intent": intent,
         "metrics": metrics.to_dict(),
     }
-    response_cache.set((course_id, student_id, norm_q), result_obj, ttl=300)
+    if not history:
+        response_cache.set((course_id, student_id, norm_q), result_obj, ttl=300)

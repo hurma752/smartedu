@@ -38,11 +38,21 @@ def chat(
 
     get_course_for_access(request.course_id, current_user, db)
 
+    recent_history_objs = db.query(ChatHistory).filter(
+        ChatHistory.student_id == current_user.id,
+        ChatHistory.course_id == request.course_id
+    ).order_by(ChatHistory.created_at.desc()).limit(6).all()
+
+    recent_history = [
+        {"role": h.role, "message": h.message} for h in reversed(recent_history_objs)
+    ]
+
     result = answer_question(
         question=request.message,
         course_id=request.course_id,
         student_id=current_user.id,
         db=db,
+        history=recent_history,
     )
 
     db.add(ChatHistory(
@@ -79,12 +89,21 @@ def chat_stream(
     course_id = request.course_id
     message = request.message
 
+    recent_history_objs = db.query(ChatHistory).filter(
+        ChatHistory.student_id == student_id,
+        ChatHistory.course_id == course_id
+    ).order_by(ChatHistory.created_at.desc()).limit(6).all()
+
+    recent_history = [
+        {"role": h.role, "message": h.message} for h in reversed(recent_history_objs)
+    ]
+
     def generate():
         full_answer = ""
         try:
             stream_db = SessionLocal()
             try:
-                for token in answer_question_stream(message, course_id, student_id, stream_db):
+                for token in answer_question_stream(message, course_id, student_id, stream_db, history=recent_history):
                     full_answer += token
                     yield token
             finally:
