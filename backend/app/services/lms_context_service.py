@@ -111,12 +111,15 @@ def build_lms_context(course_id: int, student_id: int, db: Session) -> str:
             clean_title = base_name.replace("_", " ").replace("-", " ").title()
             lines.append(f" - Lecture {idx} ({lbl} Lecture{latest}): Title: \"{clean_title}\" (Filename: {doc.filename})")
 
-    if not assignments:
-        lines.append("[Assignments] Total: 0")
-    else:
+    # Calculate Student Grade Analytics & Risk Classification
+    earned_marks = 0
+    possible_marks = 0
+    overdue_count = 0
+
+    if assignments:
         lines.append(f"[Assignments] Total: {len(assignments)}")
         for a in assignments:
-            marks = rubric_map.get(a.rubric_id, "N/A")
+            marks = rubric_map.get(a.rubric_id, 0)
             sub = student_sub_map.get(a.id)
 
             due_str = "No deadline"
@@ -128,13 +131,19 @@ def build_lms_context(course_id: int, student_id: int, db: Session) -> str:
             if sub is None:
                 if a.due_date and now > (a.due_date.replace(tzinfo=timezone.utc) if a.due_date.tzinfo is None else a.due_date):
                     status_str = "OVERDUE (not submitted)"
+                    overdue_count += 1
                 else:
                     status_str = "PENDING (not submitted)"
             elif sub.status == "teacher_reviewed":
                 g = grade_map.get(sub.id)
-                score_str = f"{g.total_score}/{marks}" if g else "Graded"
+                score_val = g.total_score if g else 0
+                score_str = f"{score_val}/{marks}" if g else "Graded"
                 fb_str = f" - Feedback: {g.teacher_comments[:80]}" if (g and g.teacher_comments) else ""
                 status_str = f"GRADED ({score_str}){fb_str}"
+
+                if isinstance(marks, (int, float)) and marks > 0:
+                    earned_marks += score_val
+                    possible_marks += marks
             elif sub.status in ("processing", "extracted", "ai_evaluated"):
                 status_str = "SUBMITTED (awaiting review)"
             elif sub.status == "failed":
@@ -144,6 +153,32 @@ def build_lms_context(course_id: int, student_id: int, db: Session) -> str:
 
             total_received = total_sub_map.get(a.id, 0)
             lines.append(f" - {a.title}: Max Marks={marks}, Due={due_str}, Total Subs={total_received}, Status={status_str}")
+
+    # Determine Student Academic Risk Category & Risk Factor Drivers
+    risk_factors = []
+    if possible_marks > 0:
+        pct = (earned_marks / possible_marks) * 100
+        if pct < 50:
+            risk_factors.append(f"Assignment Grade Average ({pct:.0f}% < 50% passing threshold)")
+        if overdue_count >= 2:
+            risk_factors.append(f"Multiple Overdue Assignments ({overdue_count} overdue)")
+
+        if pct < 50 or overdue_count >= 2:
+            risk_level = f"HIGH RISK (Action Required - Grade {pct:.0f}%)"
+        elif pct < 70 or overdue_count == 1:
+            risk_level = f"MODERATE RISK (Attention Needed - Grade {pct:.0f}%)"
+        else:
+            risk_level = f"LOW RISK (On Track - Grade {pct:.0f}%)"
+    else:
+        if overdue_count > 0:
+            risk_factors.append(f"Unsubmitted/Overdue Assignments ({overdue_count} overdue)")
+            risk_level = "MODERATE RISK (Overdue Assignments Pending)"
+        else:
+            risk_level = "NEUTRAL / SAFE (No Graded Items Yet)"
+
+    factors_str = " | Primary Risk Drivers: " + "; ".join(risk_factors) if risk_factors else " | Primary Risk Drivers: All metrics on track"
+
+    lines.append(f"[Student Performance Analytics] Earned Score: {earned_marks}/{possible_marks} | Academic Risk Status: {risk_level}{factors_str} | Multi-Factor Risk Model Dimensions: [1] Assignment Grade Average, [2] Missing/Overdue Rate, [3] Lateness Rate, [4] Lecture Attendance Rate, [5] AI Chatbot Engagement Level, [6] Material Access/Downloads, [7] Score Trajectory Trend, [8] Submission Extraction/OCR Rate.")
 
     result_context = "\n".join(lines)
     lms_context_cache.set((course_id, student_id), result_context, ttl=60)
