@@ -1,6 +1,7 @@
 # app/routers/chat.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from fastapi.responses import StreamingResponse
@@ -18,6 +19,7 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     course_id: int
+    session_id: Optional[str] = "default"
 
 
 class EditMessageRequest(BaseModel):
@@ -31,23 +33,76 @@ class ChatResponse(BaseModel):
     metrics: Optional[Dict[str, Any]] = None
 
 
-@router.get("/history/{course_id}")
-def get_chat_history(
+@router.get("/sessions/{course_id}")
+def list_chat_sessions(
     course_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Retrieves full persistent chat history for the student & course."""
+    """Lists distinct chat sessions for the student in a course with first message title and latest timestamp."""
     get_course_for_access(course_id, current_user, db)
 
-    records = db.query(ChatHistory).filter(
+    # Query distinct session_ids and their latest message timestamp
+    subquery = db.query(
+        ChatHistory.session_id,
+        func.max(ChatHistory.created_at).label("last_updated"),
+        func.min(ChatHistory.id).label("first_msg_id")
+    ).filter(
         ChatHistory.student_id == current_user.id,
         ChatHistory.course_id == course_id
-    ).order_by(ChatHistory.created_at.asc()).all()
+    ).group_by(ChatHistory.session_id).order_by(text_last_updated_desc()).all()
+
+    sessions = []
+    for row in subquery:
+        first_msg = db.query(ChatHistory.message).filter(ChatHistory.id == row.first_msg_id).first()
+        title = (first_msg[0][:40] + "...") if first_msg and first_msg[0] else "New Chat"
+        sessions.append({
+            "session_id": row.session_id,
+            "title": title,
+            "last_updated": row.last_updated.isoformat() if row.last_updated else None
+        })
+
+    return sessions
+
+
+def text_last_updated_desc():
+    return func.max(ChatHistory.created_at).desc()
+
+
+@router.get("/history/{course_id}")
+def get_chat_history(
+    course_id: int,
+    session_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieves chat history filtered by session_id."""
+    get_course_for_access(course_id, current_user, db)
+
+    query = db.query(ChatHistory).filter(
+        ChatHistory.student_id == current_user.id,
+        ChatHistory.course_id == course_id
+    )
+
+    if session_id:
+        query = query.filter(ChatHistory.session_id == session_id)
+    else:
+        # Default: pick most recent active session_id if any exists
+        latest_row = db.query(ChatHistory.session_id).filter(
+            ChatHistory.student_id == current_user.id,
+            ChatHistory.course_id == course_id
+        ).order_by(ChatHistory.created_at.desc()).first()
+        if latest_row:
+            query = query.filter(ChatHistory.session_id == latest_row[0])
+        else:
+            return []
+
+    records = query.order_by(ChatHistory.created_at.asc()).all()
 
     return [
         {
             "id": r.id,
+            "session_id": r.session_id,
             "role": r.role,
             "message": r.message,
             "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -56,13 +111,29 @@ def get_chat_history(
     ]
 
 
+@router.delete("/session/{session_id}")
+def delete_chat_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Deletes an entire chat session owned by the student."""
+    db.query(ChatHistory).filter(
+        ChatHistory.session_id == session_id,
+        ChatHistory.student_id == current_user.id
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    return {"message": "Chat session deleted successfully."}
+
+
 @router.delete("/history/{course_id}")
 def clear_chat_history(
     course_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Clears all conversation history for the student & course (Start New Conversation)."""
+    """Clears all conversation history for the student & course across all sessions."""
     get_course_for_access(course_id, current_user, db)
 
     db.query(ChatHistory).filter(
@@ -71,7 +142,7 @@ def clear_chat_history(
     ).delete(synchronize_session=False)
     db.commit()
 
-    return {"message": "Chat history cleared successfully."}
+    return {"message": "All chat history cleared successfully."}
 
 
 @router.delete("/message/{message_id}")
@@ -128,10 +199,12 @@ def chat(
         raise HTTPException(400, "Message cannot be empty")
 
     get_course_for_access(request.course_id, current_user, db)
+    sess_id = request.session_id or "default"
 
     recent_history_objs = db.query(ChatHistory).filter(
         ChatHistory.student_id == current_user.id,
-        ChatHistory.course_id == request.course_id
+        ChatHistory.course_id == request.course_id,
+        ChatHistory.session_id == sess_id
     ).order_by(ChatHistory.created_at.desc()).limit(12).all()
 
     recent_history = [
@@ -147,11 +220,11 @@ def chat(
     )
 
     db.add(ChatHistory(
-        student_id=current_user.id, course_id=request.course_id,
+        session_id=sess_id, student_id=current_user.id, course_id=request.course_id,
         message=request.message, role="user",
     ))
     db.add(ChatHistory(
-        student_id=current_user.id, course_id=request.course_id,
+        session_id=sess_id, student_id=current_user.id, course_id=request.course_id,
         message=result["answer"], role="assistant",
     ))
     db.commit()
@@ -179,15 +252,25 @@ def chat_stream(
     student_id = current_user.id
     course_id = request.course_id
     message = request.message
+    sess_id = request.session_id or "default"
 
     recent_history_objs = db.query(ChatHistory).filter(
         ChatHistory.student_id == student_id,
-        ChatHistory.course_id == course_id
+        ChatHistory.course_id == course_id,
+        ChatHistory.session_id == sess_id
     ).order_by(ChatHistory.created_at.desc()).limit(12).all()
 
     recent_history = [
         {"role": h.role, "message": h.message} for h in reversed(recent_history_objs)
     ]
+
+    # Commit user message to ChatHistory immediately so it's guaranteed to be saved
+    db.add(ChatHistory(
+        session_id=sess_id, student_id=student_id, course_id=course_id,
+        message=message, role="user",
+    ))
+    db.commit()
+    log_event(student_id, course_id, "chat_message", db)
 
     def generate():
         full_answer = ""
@@ -200,22 +283,19 @@ def chat_stream(
             finally:
                 stream_db.close()
         except Exception as e:
+            full_answer += f"\n\n[Error: {str(e)}]"
             yield f"\n\n[Error: {str(e)}]"
             return
-
-        history_db = SessionLocal()
-        try:
-            history_db.add(ChatHistory(
-                student_id=student_id, course_id=course_id,
-                message=message, role="user",
-            ))
-            history_db.add(ChatHistory(
-                student_id=student_id, course_id=course_id,
-                message=full_answer, role="assistant",
-            ))
-            history_db.commit()
-            log_event(student_id, course_id, "chat_message", history_db)
         finally:
-            history_db.close()
+            if full_answer.strip():
+                history_db = SessionLocal()
+                try:
+                    history_db.add(ChatHistory(
+                        session_id=sess_id, student_id=student_id, course_id=course_id,
+                        message=full_answer, role="assistant",
+                    ))
+                    history_db.commit()
+                finally:
+                    history_db.close()
 
     return StreamingResponse(generate(), media_type="text/plain")

@@ -1,7 +1,7 @@
 // src/api/chat.js
 import client from "./client";
 
-export async function sendMessageStream(courseId, message, onChunk, signal) {
+export async function sendMessageStream(courseId, message, sessionId, onChunk, signal) {
   const token = localStorage.getItem("token");
   const response = await fetch(
     `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/api/chat/stream`,
@@ -11,7 +11,7 @@ export async function sendMessageStream(courseId, message, onChunk, signal) {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ course_id: courseId, message }),
+      body: JSON.stringify({ course_id: courseId, message, session_id: sessionId || "default" }),
       signal,
     }
   );
@@ -34,12 +34,21 @@ export async function sendMessageStream(courseId, message, onChunk, signal) {
   }
 }
 
-export function sendMessage(courseId, message) {
-  return client.post("/api/chat/", { course_id: courseId, message });
+export function sendMessage(courseId, message, sessionId) {
+  return client.post("/api/chat/", { course_id: courseId, message, session_id: sessionId || "default" });
 }
 
-export function getChatHistory(courseId) {
-  return client.get(`/api/chat/history/${courseId}`);
+export function getChatHistory(courseId, sessionId) {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  return client.get(`/api/chat/history/${courseId}${params}`);
+}
+
+export function listChatSessions(courseId) {
+  return client.get(`/api/chat/sessions/${courseId}`);
+}
+
+export function deleteChatSession(sessionId) {
+  return client.delete(`/api/chat/session/${encodeURIComponent(sessionId)}`);
 }
 
 export function clearChatHistory(courseId) {

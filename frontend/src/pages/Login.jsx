@@ -114,8 +114,8 @@ export default function Login() {
               style={{
                 width: "100%",
                 background: C.primary,
-                color: "#ffffff",
-                opacity: loading ? 0.75 : 1,
+                color: C.primaryText,
+                opacity: loading ? 0.7 : 1,
                 border: "none",
                 borderRadius: "8px",
                 padding: "13px",

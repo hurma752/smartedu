@@ -18,7 +18,11 @@ export default function StudentCourseDetail() {
   const [course,    setCourse]    = useState(null);
   const [documents, setDocuments] = useState([]);
 
-  // Chat state
+  // Chat state & Multi-Session Management
+  const [sessionId, setSessionId] = useState(() => {
+    return localStorage.getItem(`smartedu_session_${courseId}`) || `sess_${Date.now()}`;
+  });
+  const [sessions, setSessions]   = useState([]);
   const [messages,  setMessages]  = useState([]);
   const [input,    setInput]    = useState("");
   const [chatting, setChatting] = useState(false);
@@ -28,11 +32,18 @@ export default function StudentCourseDetail() {
   const abortRef = useRef(null);
   const endRef   = useRef(null);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (targetSessionId) => {
+    const sid = typeof targetSessionId === "string" ? targetSessionId : sessionId;
     try {
-      const { data } = await chatApi.getChatHistory(courseId);
-      if (data && data.length > 0) {
-        setMessages(data.map((m) => ({
+      const [histRes, sessRes] = await Promise.all([
+        chatApi.getChatHistory(courseId, sid),
+        chatApi.listChatSessions(courseId).catch(() => ({ data: [] })),
+      ]);
+
+      if (sessRes.data) setSessions(sessRes.data);
+
+      if (histRes.data && histRes.data.length > 0) {
+        setMessages(histRes.data.map((m) => ({
           id: m.id,
           role: m.role,
           content: m.message,
@@ -48,7 +59,7 @@ export default function StudentCourseDetail() {
         { role: "assistant", content: "Ask me anything about this course's material, lectures, assignments, or grades." },
       ]);
     }
-  }, [courseId]);
+  }, [courseId, sessionId]);
 
   useEffect(() => {
     coursesApi.getCourse(courseId).then(({ data }) => setCourse(data));
@@ -64,10 +75,42 @@ export default function StudentCourseDetail() {
 
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
+  const handleNewChat = () => {
+    const newSessId = `sess_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    setSessionId(newSessId);
+    localStorage.setItem(`smartedu_session_${courseId}`, newSessId);
+    setMessages([
+      { role: "assistant", content: "Ask me anything about this course's material, lectures, assignments, or grades." },
+    ]);
+    chatApi.listChatSessions(courseId).then(res => setSessions(res.data || [])).catch(() => {});
+  };
+
+  const handleSwitchSession = (newSessId) => {
+    if (!newSessId || newSessId === sessionId) return;
+    setSessionId(newSessId);
+    localStorage.setItem(`smartedu_session_${courseId}`, newSessId);
+    loadHistory(newSessId);
+  };
+
+  const handleDeleteSession = async (sessIdToDelete) => {
+    if (!confirm("Delete this entire chat session?")) return;
+    try {
+      await chatApi.deleteChatSession(sessIdToDelete);
+      if (sessIdToDelete === sessionId) {
+        handleNewChat();
+      } else {
+        loadHistory(sessionId);
+      }
+    } catch {
+      alert("Couldn't delete chat session.");
+    }
+  };
+
   const handleSend = async (textOverride) => {
-    const question = (textOverride || input).trim();
+    const rawText = typeof textOverride === "string" ? textOverride : input;
+    const question = (rawText || "").trim();
     if (!question || chatting) return;
-    if (!textOverride) setInput("");
+    if (typeof textOverride !== "string") setInput("");
 
     setMessages((prev) => [...prev, { role: "user", content: question, createdAt: new Date().toISOString() }]);
     setChatting(true);
@@ -77,7 +120,7 @@ export default function StudentCourseDetail() {
     abortRef.current = controller;
 
     try {
-      await chatApi.sendMessageStream(courseId, question, (partialText) => {
+      await chatApi.sendMessageStream(Number(courseId), question, sessionId, (partialText) => {
         setMessages((prev) => {
           const updated = [...prev];
           updated[updated.length - 1] = {
@@ -88,8 +131,8 @@ export default function StudentCourseDetail() {
           return updated;
         });
       }, controller.signal);
-      // Reload persistent history IDs
-      loadHistory();
+      // Quietly refresh sessions list in background without touching messages state
+      chatApi.listChatSessions(courseId).then(res => setSessions(res.data || [])).catch(() => {});
     } catch (err) {
       if (err.name === "AbortError") {
         setMessages((prev) => {
@@ -127,18 +170,6 @@ export default function StudentCourseDetail() {
 
   const handleStop = () => {
     abortRef.current?.abort();
-  };
-
-  const handleClearHistory = async () => {
-    if (!confirm("Start a new conversation? This will clear history for this course.")) return;
-    try {
-      await chatApi.clearChatHistory(courseId);
-      setMessages([
-        { role: "assistant", content: "Ask me anything about this course's material, lectures, assignments, or grades." },
-      ]);
-    } catch {
-      alert("Couldn't clear chat history.");
-    }
   };
 
   const handleDeleteMessage = async (msgId, index) => {
@@ -224,20 +255,64 @@ export default function StudentCourseDetail() {
         {activeTab === "chatbot" && (
           <div style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: "460px", overflow: "hidden" }}>
 
-            {/* Chatbot Header with New Conversation Button */}
-            <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.subtleBg }}>
+            {/* Chatbot Header with New Chat & Saved Chat Sessions Selector */}
+            <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.subtleBg, flexWrap: "wrap", gap: "10px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <i className="ti ti-sparkles" style={{ fontSize: "18px", color: C.accent }} />
                 <span style={{ fontSize: "14px", fontWeight: "700", color: C.textPrimary }}>SmartEdu AI Assistant</span>
               </div>
-              <button
-                onClick={handleClearHistory}
-                className="btn-interactive"
-                style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 12px", borderRadius: "6px", background: C.cardBg, border: `1px solid ${C.border}`, color: C.textSecondary, fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
-              >
-                <i className="ti ti-plus" style={{ fontSize: "14px" }} />
-                New Chat
-              </button>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {sessions.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <select
+                      value={sessionId}
+                      onChange={(e) => handleSwitchSession(e.target.value)}
+                      style={{
+                        background: C.cardBg,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: "6px",
+                        padding: "6px 10px",
+                        fontSize: "12px",
+                        fontWeight: "500",
+                        color: C.textPrimary,
+                        fontFamily: "inherit",
+                        cursor: "pointer",
+                        outline: "none",
+                        maxWidth: "180px",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis"
+                      }}
+                    >
+                      <option value={sessionId}>Current Conversation</option>
+                      {sessions.filter(s => s.session_id !== sessionId).map(s => (
+                        <option key={s.session_id} value={s.session_id}>
+                          {s.title}
+                        </option>
+                      ))}
+                    </select>
+                    {sessions.length > 1 && (
+                      <button
+                        onClick={() => handleDeleteSession(sessionId)}
+                        title="Delete active chat session"
+                        style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", padding: "4px", display: "inline-flex" }}
+                      >
+                        <i className="ti ti-trash" style={{ fontSize: "14px" }} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleNewChat}
+                  className="btn-interactive"
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 12px", borderRadius: "6px", background: C.cardBg, border: `1px solid ${C.border}`, color: C.textSecondary, fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  <i className="ti ti-plus" style={{ fontSize: "14px" }} />
+                  New Chat
+                </button>
+              </div>
             </div>
 
             {/* Messages */}
