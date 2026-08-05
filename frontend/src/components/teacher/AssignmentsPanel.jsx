@@ -195,7 +195,7 @@ export default function AssignmentsPanel({ courseId }) {
                   Cancel
                 </button>
                 <button type="submit"
-                  style={{ flex: 1, padding: "9px 16px", borderRadius: "7px", border: "none", background: C.primary, color: "#fff", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px" }}>
+                  style={{ flex: 1, padding: "9px 16px", borderRadius: "7px", border: "none", background: C.primary, color: C.primaryText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px" }}>
                   <i className="ti ti-clipboard-list" style={{ fontSize: "15px" }} />
                   Create assignment ({totalMarks} marks)
                 </button>

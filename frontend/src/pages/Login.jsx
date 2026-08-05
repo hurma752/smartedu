@@ -78,7 +78,7 @@ export default function Login() {
             {/* SmartEdu label */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
               <div style={{ height: "1px", width: "28px", background: C.border }} />
-              <span style={{ fontSize: "11px", fontWeight: "700", color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase" }}>SmartEdu</span>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: C.textMuted, letterSpacing: "0.1em", textTransform: "uppercase" }}>SmartEdu LMS</span>
               <div style={{ height: "1px", width: "28px", background: C.border }} />
             </div>
           </div>
@@ -111,25 +111,7 @@ export default function Login() {
             </div>
 
             <button type="submit" disabled={loading} className="btn-interactive"
-              style={{
-                width: "100%",
-                background: C.primary,
-                color: C.primaryText,
-                opacity: loading ? 0.7 : 1,
-                border: "none",
-                borderRadius: "8px",
-                padding: "13px",
-                fontSize: "15px",
-                fontWeight: "600",
-                fontFamily: "inherit",
-                cursor: loading ? "not-allowed" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "9px",
-                letterSpacing: "0.01em",
-                transition: "all 0.15s ease"
-              }}>
+              style={{ width: "100%", background: loading ? C.subtleBg : C.primary, color: C.primaryText, border: "none", borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600", fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "9px", letterSpacing: "0.01em" }}>
               {loading
                 ? <><i className="ti ti-loader-2" style={{ fontSize: "17px", animation: "spin 1s linear infinite" }} />Signing in…</>
                 : <><i className="ti ti-lock" style={{ fontSize: "16px" }} />Sign in</>

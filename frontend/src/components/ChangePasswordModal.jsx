@@ -3,6 +3,7 @@
 // No current-password field (admin-provisioned flow)
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import * as passwordApi from "../api/password";
 import { getErrorMessage } from "../utils/errorMessage";
 import { C } from "../theme";
@@ -62,14 +63,14 @@ export default function ChangePasswordModal({ onClose }) {
     }
   };
 
-  return (
+  return createPortal(
     <div
       role="dialog" aria-modal="true" aria-labelledby="cpw-title"
-      style={{ position: "fixed", inset: 0, zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", fontFamily: "'Inter', system-ui, sans-serif" }}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", boxSizing: "border-box", fontFamily: "'Inter', system-ui, sans-serif" }}
     >
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)" }} />
+      <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} />
 
-      <div style={{ position: "relative", zIndex: 1, background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "400px", boxShadow: "0 12px 48px rgba(0,0,0,0.22)", overflow: "hidden" }}>
+      <div style={{ position: "relative", zIndex: 1, background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "400px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 12px 48px rgba(0,0,0,0.22)" }}>
 
         <div style={{ height: "3px", background: C.accent }} />
 
@@ -151,7 +152,8 @@ export default function ChangePasswordModal({ onClose }) {
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
+    </div>,
+    document.body
   );
 }
 

@@ -1,5 +1,6 @@
 // src/pages/TeacherSubmissions.jsx
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import Layout, { PageShell, Btn } from "../components/Layout";
 import * as assignmentsApi from "../api/assignments";
@@ -885,15 +886,16 @@ function DeadlineHistoryModal({ history, onClose }) {
 }
 
 function ModalOverlay({ children, onClose }) {
-  return (
+  return createPortal(
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "20px", boxSizing: "border-box" }}
     >
       <div onClick={(e) => e.stopPropagation()} className="animate-slide-up" style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "440px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,0.2)" }}>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

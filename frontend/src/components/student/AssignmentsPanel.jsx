@@ -232,7 +232,7 @@ function AssignmentCard({ assignment: a, submission, grade, badges, past, justSu
                 <i className="ti ti-lock" style={{ fontSize: "15px" }} />The deadline has passed. Submissions are no longer accepted.
               </div>
             ) : (
-              <label style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "9px 16px", borderRadius: "7px", background: uploading ? C.textMuted : C.primary, color: "#fff", fontSize: "14px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "9px 16px", borderRadius: "7px", background: uploading ? C.textMuted : C.primary, color: C.primaryText, fontSize: "14px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
                 <i className="ti ti-upload" style={{ fontSize: "15px" }} />
                 {uploading ? "Uploading…" : "Submit PDF"}
                 <input type="file" accept=".pdf" onChange={(e) => onUpload(e.target.files[0])} disabled={uploading} style={{ display: "none" }} />
