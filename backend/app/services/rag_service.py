@@ -48,6 +48,55 @@ ORDINAL_MAP = {
 }
 
 
+def ingest_document_task(document_id: int, file_path: str, course_id: int, db_session_factory):
+    """
+    Runs as a FastAPI BackgroundTask. Takes a SESSION FACTORY (not a session)
+    because the session that handled the original HTTP request gets closed
+    as soon as the response is returned — background tasks need their OWN
+    fresh session, opened and closed inside this function.
+    """
+    db: Session = db_session_factory()
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            return
+
+        raw_text = extract_text_from_pdf(file_path)
+        if not raw_text.strip():
+            document.status = "failed"
+            document.error_message = "No text could be extracted from this PDF"
+            db.commit()
+            return
+
+        text_chunks = chunk_text(raw_text, chunk_size=500, overlap=100)
+        if not text_chunks:
+            document.status = "failed"
+            document.error_message = "Chunking produced no results"
+            db.commit()
+            return
+
+        embeddings = get_embeddings(text_chunks)
+        chunks_data = [{"text": t, "embedding": e} for t, e in zip(text_chunks, embeddings)]
+
+        stored_count = add_chunks_to_collection(
+            course_id=course_id,
+            document_id=document_id,
+            chunks=chunks_data,
+        )
+
+        document.status = "indexed"
+        document.chunk_count = stored_count
+        db.commit()
+
+    except Exception as e:
+        if document:
+            document.status = "failed"
+            document.error_message = str(e)
+            db.commit()
+    finally:
+        db.close()
+
+
 def resolve_lecture_ordinal(question: str, course_id: int, db: Session):
     """
     Parses ordinal references like 'Lecture 1', 'first lecture', '2nd lecture', 'latest lecture'
