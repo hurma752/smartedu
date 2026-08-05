@@ -289,5 +289,5 @@ const inputStyle = {
   borderRadius: "7px", padding: "10px 13px", fontSize: "15px",
   color: C.textPrimary, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
 };
-const focusOn  = (e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = "#fff"; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; };
+const focusOn  = (e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; };
 const focusOff = (e) => { e.target.style.borderColor = "transparent"; e.target.style.background = C.inputBg; e.target.style.boxShadow = "none"; };

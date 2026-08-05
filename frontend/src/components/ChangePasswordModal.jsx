@@ -138,7 +138,7 @@ export default function ChangePasswordModal({ onClose }) {
                   Cancel
                 </button>
                 <button type="submit" disabled={loading || !allFilled || !!mismatch}
-                  style={{ flex: 1, padding: "9px 16px", borderRadius: "7px", border: "none", background: (loading || !allFilled || mismatch) ? C.textMuted : C.primary, color: "#fff", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: (loading || !allFilled || mismatch) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px", transition: "background 0.15s" }}>
+                  style={{ flex: 1, padding: "9px 16px", borderRadius: "7px", border: "none", background: (loading || !allFilled || mismatch) ? C.textMuted : C.primary, color: C.primaryText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: (loading || !allFilled || mismatch) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px", transition: "background 0.15s" }}>
                   {loading
                     ? <><i className="ti ti-loader-2" style={{ fontSize: "16px", animation: "spin 1s linear infinite" }} />Updating…</>
                     : <><i className="ti ti-lock" style={{ fontSize: "15px" }} />Update password</>
@@ -170,7 +170,7 @@ function PwField({ label, value, onChange, show, onToggle, placeholder, error })
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          style={{ width: "100%", background: focused ? "#fff" : C.inputBg, border: `1.5px solid ${error ? C.accent : focused ? C.focusBorder : "transparent"}`, boxShadow: focused ? "0 0 0 3px rgba(17,17,17,0.08)" : "none", borderRadius: "7px", padding: "10px 40px 10px 36px", fontSize: "15px", color: C.textPrimary, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+          style={{ width: "100%", background: focused ? C.inputFocus : C.inputBg, border: `1.5px solid ${error ? C.accent : focused ? C.focusBorder : C.border}`, borderRadius: "7px", padding: "10px 40px 10px 36px", fontSize: "15px", color: C.textPrimary, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
         />
         <button type="button" onClick={onToggle} aria-label={show ? "Hide password" : "Show password"}
           style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: C.textMuted, fontSize: "16px", padding: "2px", display: "flex", alignItems: "center" }}>

@@ -14,6 +14,7 @@ class TokenResponse(BaseModel):
     role: str
     full_name: str
     user_id: int
+    email: Optional[str] = None
 
 
 class AdminCreateUser(BaseModel):

@@ -1,8 +1,8 @@
-// src/main.jsx — replace entirely with this temporarily
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import { ThemeProvider } from './context/ThemeContext'
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -32,6 +32,8 @@ class ErrorBoundary extends React.Component {
 
 createRoot(document.getElementById('root')).render(
   <ErrorBoundary>
-    <App />
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
   </ErrorBoundary>
 )

@@ -5,10 +5,12 @@
 // Tablet: icon-only collapsed sidebar
 // Desktop: full sidebar with label text
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { NavLink, useNavigate, useParams, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import ChangePasswordModal from "./ChangePasswordModal";
+import * as coursesApi from "../api/courses";
 import { C, ROLE_COLORS, T } from "../theme";
 
 const NAV = {
@@ -44,6 +46,7 @@ export default function Layout({ children }) {
   const location  = useLocation();
   const params    = useParams();
   const [showPw, setShowPw]           = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [collapsed, setCollapsed]     = useState(false);
   const [mobileOpen, setMobileOpen]   = useState(false);
 
@@ -61,13 +64,10 @@ export default function Layout({ children }) {
   const initials = (user?.fullName || "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
   const AlphaLogo = ({ size = "md" }) => {
-    const s = size === "sm"
-      ? { wrap: { padding: "5px 8px", borderRadius: "5px" }, red: { fontSize: "11px", padding: "3px 6px", borderRadius: "3px" }, txt: { fontSize: "7px", paddingLeft: "6px" } }
-      : { wrap: { padding: "7px 10px", borderRadius: "6px" }, red: { fontSize: "13px", padding: "4px 7px", borderRadius: "4px" }, txt: { fontSize: "8px", paddingLeft: "7px" } };
+    const height = size === "sm" ? "26px" : "34px";
     return (
-      <div style={{ display: "inline-flex", background: "#111111", alignItems: "center", ...s.wrap }}>
-        <span style={{ background: C.accent, color: "#fff", fontWeight: "800", lineHeight: 1, letterSpacing: "0.01em", ...s.red }}>alpha</span>
-        <span style={{ color: "#fff", fontWeight: "700", lineHeight: "1.25", letterSpacing: "0.05em", textTransform: "uppercase", ...s.txt }}>ALPHA<br />EDUCATION<br />NETWORK</span>
+      <div style={{ display: "inline-flex", borderRadius: "6px", overflow: "hidden" }}>
+        <img src="/alpha-welcome-logo.png" alt="Alpha Education Network" style={{ height, width: "auto", display: "block" }} />
       </div>
     );
   };
@@ -83,7 +83,7 @@ export default function Layout({ children }) {
         ) : (
           <>
             <AlphaLogo size="md" />
-            <span style={{ ...T.tiny, fontWeight: "600", color: C.sidebarMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>SmartEdu LMS</span>
+            <span style={{ ...T.tiny, fontWeight: "600", color: C.sidebarMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>SmartEdu</span>
           </>
         )}
       </div>
@@ -280,19 +280,39 @@ export default function Layout({ children }) {
         )}
       </nav>
 
-      {/* User + actions */}
-      <div style={{ borderTop: `1px solid ${C.sidebarBorder}`, padding: "12px 8px" }}>
-        {!iconOnly && (
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", borderRadius: "7px", background: "rgba(255,255,255,0.05)", marginBottom: "6px" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "#fff" }}>{initials}</span>
+      {/* User profile & action links */}
+      <div style={{ padding: "10px 8px 12px", borderTop: `1px solid ${C.sidebarBorder}`, display: "flex", flexDirection: "column", gap: "2px" }}>
+        {!iconOnly && user && (
+          <div
+            onClick={() => setShowProfileModal(true)}
+            style={{
+              padding: "10px 12px",
+              marginBottom: "8px",
+              borderRadius: "8px",
+              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${C.sidebarBorder}`,
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              cursor: "pointer",
+              transition: "background 0.12s ease",
+            }}
+          >
+            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: "700", color: "#fff", flexShrink: 0 }}>
+              {initials}
             </div>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: "13px", fontWeight: "500", color: "#fff", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user?.fullName}</p>
-              <span style={{ ...T.tiny, fontWeight: "500", padding: "1px 6px", borderRadius: "20px", background: rc.bg, color: rc.text, textTransform: "capitalize" }}>{user?.role}</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <p style={{ ...T.navItem, fontWeight: "600", color: "#fff", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {user.fullName}
+              </p>
+              <span style={{ fontSize: "10px", color: rc.text, background: rc.bg, padding: "1px 6px", borderRadius: "4px", fontWeight: "600", textTransform: "uppercase" }}>
+                {user.role}
+              </span>
             </div>
           </div>
         )}
+        <ThemeToggleBtn style={{ width: "100%", justifyContent: iconOnly ? "center" : "flex-start", borderRadius: "6px", background: "none", border: "none", color: C.sidebarText, marginBottom: "2px" }} />
+        <SbBtn icon="ti-user" label="My profile" iconOnly={iconOnly} onClick={() => setShowProfileModal(true)} />
         <SbBtn icon="ti-lock" label="Change password" iconOnly={iconOnly} onClick={() => setShowPw(true)} />
         <SbBtn icon="ti-logout" label="Sign out" iconOnly={iconOnly} danger onClick={() => { logout(); navigate("/login", { replace: true }); }} />
       </div>
@@ -325,9 +345,12 @@ export default function Layout({ children }) {
       {/* ── Mobile top bar (<768px) ─────────────────────────────── */}
       <div className="mobile-topbar" style={{ display: "none", background: C.sidebarBg, position: "sticky", top: 0, zIndex: 100, alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: `1px solid ${C.sidebarBorder}` }}>
         <AlphaLogo size="sm" />
-        <button onClick={() => setMobileOpen(!mobileOpen)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.7)", fontSize: "22px", padding: "2px", display: "flex", alignItems: "center" }}>
-          <i className={mobileOpen ? "ti ti-x" : "ti ti-menu-2"} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <ThemeToggleBtn />
+          <button onClick={() => setMobileOpen(!mobileOpen)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.7)", fontSize: "22px", padding: "2px", display: "flex", alignItems: "center" }}>
+            <i className={mobileOpen ? "ti ti-x" : "ti ti-menu-2"} />
+          </button>
+        </div>
       </div>
 
       {/* ── Mobile drawer overlay ───────────────────────────────── */}
@@ -352,6 +375,13 @@ export default function Layout({ children }) {
       </main>
 
       {showPw && <ChangePasswordModal onClose={() => setShowPw(false)} />}
+      {showProfileModal && (
+        <UserProfileModal
+          user={user}
+          onClose={() => setShowProfileModal(false)}
+          onChangePassword={() => setShowPw(true)}
+        />
+      )}
 
       <style>{`
         * { box-sizing: border-box; }
@@ -367,6 +397,205 @@ export default function Layout({ children }) {
   );
 }
 
+function CourseSwitcherDropdown({ role, activeCourseId }) {
+  const [courses, setCourses] = useState([]);
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (role === "student") {
+      coursesApi.listEnrolledCourses().then(res => setCourses(res.data || [])).catch(() => {});
+    } else if (role === "teacher") {
+      coursesApi.listTeachingCourses().then(res => setCourses(res.data || [])).catch(() => {});
+    }
+  }, [role]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (!role || (role !== "student" && role !== "teacher") || courses.length === 0) {
+    return null;
+  }
+
+  const activeCourse = courses.find(c => String(c.id) === String(activeCourseId));
+
+  return (
+    <div ref={dropdownRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="btn-interactive"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "6px 14px",
+          borderRadius: "20px",
+          background: C.subtleBg,
+          border: `1px solid ${activeCourse ? C.accent : C.border}`,
+          color: C.textPrimary,
+          fontSize: "13px",
+          fontWeight: "600",
+          cursor: "pointer",
+          transition: "all 0.15s ease",
+        }}
+      >
+        <i className="ti ti-books" style={{ fontSize: "16px", color: C.accent }} />
+        <span style={{ maxWidth: "180px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {activeCourse ? activeCourse.name : "My Courses"}
+        </span>
+        <i className="ti ti-chevron-down" style={{ fontSize: "14px", color: C.textMuted, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }} />
+      </button>
+
+      {open && (
+        <div
+          className="animate-slide-up"
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "calc(100% + 8px)",
+            zIndex: 150,
+            width: "260px",
+            background: C.cardBg,
+            borderRadius: "10px",
+            border: `1px solid ${C.border}`,
+            boxShadow: "0 8px 30px rgba(0,0,0,0.15)",
+            padding: "6px",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: "11px", fontWeight: "700", color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
+              Quick Course Switcher
+            </p>
+          </div>
+          <div style={{ maxHeight: "240px", overflowY: "auto", padding: "4px 0" }}>
+            {courses.map((c) => {
+              const isSelected = String(c.id) === String(activeCourseId);
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => {
+                    setOpen(false);
+                    if (role === "teacher") {
+                      navigate(`/teacher/courses/${c.id}`);
+                    } else {
+                      navigate(`/student/courses/${c.id}`);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    background: isSelected ? C.accentTint : "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    color: isSelected ? C.accentText : C.textPrimary,
+                    fontSize: "13px",
+                    fontWeight: isSelected ? "600" : "400",
+                    transition: "background 0.12s ease",
+                  }}
+                >
+                  <div style={{ minWidth: 0, paddingRight: "8px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: "600", display: "block", color: isSelected ? C.accentText : C.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {c.name}
+                    </span>
+                    <span style={{ fontSize: "11px", fontWeight: "500", display: "block", color: C.textMuted }}>
+                      {c.code}
+                    </span>
+                  </div>
+                  {isSelected && <i className="ti ti-check" style={{ fontSize: "16px", color: C.accent }} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserProfileModal({ user, onClose, onChangePassword }) {
+  if (!user) return null;
+  const rc = ROLE_COLORS[user.role] || ROLE_COLORS.student;
+  const initials = (user.fullName || "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+      <div className="animate-slide-up" style={{ background: C.cardBg, borderRadius: "12px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "440px", overflow: "hidden", boxShadow: "0 12px 40px rgba(0,0,0,0.2)" }}>
+        {/* Top Header Accent */}
+        <div style={{ background: C.sidebarBg, padding: "24px 24px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.sidebarBorder}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", fontWeight: "800", color: "#fff" }}>
+              {initials}
+            </div>
+            <div>
+              <h3 style={{ fontSize: "17px", fontWeight: "700", color: "#fff", margin: "0 0 3px" }}>{user.fullName}</h3>
+              <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "20px", background: rc.bg, color: rc.text, textTransform: "uppercase" }}>{user.role}</span>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", fontSize: "20px", cursor: "pointer", padding: "4px" }}>
+            <i className="ti ti-x" />
+          </button>
+        </div>
+
+        {/* Profile Details List */}
+        <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div style={{ background: C.subtleBg, borderRadius: "8px", padding: "12px 14px", border: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: "11px", fontWeight: "700", color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Full Name</p>
+            <p style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary, margin: 0 }}>{user.fullName}</p>
+          </div>
+
+          <div style={{ background: C.subtleBg, borderRadius: "8px", padding: "12px 14px", border: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: "11px", fontWeight: "700", color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Email Address</p>
+            <p style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary, margin: 0 }}>{user.email || "User Email"}</p>
+          </div>
+
+          <div style={{ background: C.subtleBg, borderRadius: "8px", padding: "12px 14px", border: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ fontSize: "11px", fontWeight: "700", color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 4px" }}>Account Role</p>
+              <p style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary, margin: 0, textTransform: "capitalize" }}>{user.role}</p>
+            </div>
+            <span style={{ fontSize: "11px", fontWeight: "600", padding: "3px 9px", borderRadius: "20px", background: C.successBg, color: C.successText, border: `1px solid ${C.successBorder}` }}>
+              Active User
+            </span>
+          </div>
+
+          {/* Action buttons */}
+          <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+            <button
+              onClick={() => { onClose(); onChangePassword(); }}
+              className="btn-interactive"
+              style={{ flex: 1, background: C.subtleBg, color: C.textPrimary, border: `1px solid ${C.border}`, borderRadius: "7px", padding: "10px", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+            >
+              <i className="ti ti-lock" style={{ fontSize: "15px" }} />
+              Change Password
+            </button>
+            <button
+              onClick={onClose}
+              className="btn-interactive"
+              style={{ flex: 1, background: C.primary, color: C.primaryText, border: "none", borderRadius: "7px", padding: "10px", fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SbBtn({ icon, label, iconOnly, danger, onClick }) {
   return (
     <button onClick={onClick} title={label}
@@ -377,9 +606,42 @@ function SbBtn({ icon, label, iconOnly, danger, onClick }) {
   );
 }
 
+export function ThemeToggleBtn({ style = {} }) {
+  const { isDark, toggleTheme } = useTheme();
+  return (
+    <button
+      onClick={toggleTheme}
+      title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+      className="btn-interactive"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "6px",
+        padding: "6px 12px",
+        borderRadius: "20px",
+        background: C.subtleBg,
+        border: `1px solid ${C.border}`,
+        color: C.textPrimary,
+        fontSize: "13px",
+        fontWeight: "600",
+        cursor: "pointer",
+        transition: "all 0.15s ease",
+        ...style
+      }}
+    >
+      <i className={`ti ${isDark ? "ti-sun" : "ti-moon"}`} style={{ fontSize: "16px", color: isDark ? "#F59E0B" : "#6366F1" }} />
+      <span>{isDark ? "Light" : "Dark"}</span>
+    </button>
+  );
+}
+
 // ── Shared page primitives ──────────────────────────────────────────────────
 
 export function PageShell({ title, subtitle, action, children }) {
+  const { user } = useAuth();
+  const params = useParams();
+
   return (
     <div className="animate-fade-in" style={{ padding: "clamp(20px, 4vw, 40px) clamp(16px, 4vw, 40px)", maxWidth: "1200px", width: "100%" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "28px", gap: "16px", flexWrap: "wrap" }}>
@@ -387,7 +649,11 @@ export function PageShell({ title, subtitle, action, children }) {
           <h1 style={{ ...T.pageTitle, color: C.textPrimary, margin: 0 }}>{title}</h1>
           {subtitle && <p style={{ ...T.pageSubtitle, color: C.textMuted, margin: "6px 0 0" }}>{subtitle}</p>}
         </div>
-        {action && <div style={{ flexShrink: 0 }}>{action}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+          {action}
+          <CourseSwitcherDropdown role={user?.role} activeCourseId={params?.courseId} />
+          <ThemeToggleBtn />
+        </div>
       </div>
       {children}
     </div>
@@ -423,7 +689,7 @@ export function Btn({ children, onClick, variant = "primary", size = "md", disab
     lg: { padding: "11px 20px", borderRadius: "8px",  fontSize: "14px" },
   };
   const variants = {
-    primary:   { background: C.primary,    color: "#fff",           border: "none" },
+    primary:   { background: C.primary,    color: C.primaryText,    border: "none" },
     accent:    { background: C.accent,     color: "#fff",           border: "none" },
     secondary: { background: C.subtleBg,   color: C.textPrimary,   border: `1px solid ${C.border}` },
     danger:    { background: C.dangerBg,   color: C.dangerText,    border: `1px solid ${C.dangerBorder}` },

@@ -128,7 +128,7 @@ export default function TeacherCourseDetail() {
               title="Lecture Materials"
               count={documents.length}
               action={
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", background: uploading ? C.textMuted : C.primary, color: "#fff", fontSize: "13px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", background: uploading ? C.textMuted : C.primary, color: C.primaryText, fontSize: "13px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
                   <i className="ti ti-upload" style={{ fontSize: "14px" }} />
                   {uploading ? "Uploading…" : "Upload PDF"}
                   <input type="file" accept=".pdf" onChange={handleUpload} disabled={uploading} style={{ display: "none" }} />

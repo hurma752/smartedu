@@ -4,23 +4,22 @@ import { useParams, useNavigate } from "react-router-dom";
 import Layout, { PageShell, Btn } from "../components/Layout";
 import * as assignmentsApi from "../api/assignments";
 import BadgePill from "../components/BadgePill";
-import { C } from "../theme";
+import { C, T } from "../theme";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main page
-// ─────────────────────────────────────────────────────────────────────────────
 export default function TeacherSubmissions() {
   const { assignmentId } = useParams();
   const navigate = useNavigate();
 
-  const [submissions, setSubmissions] = useState([]);
-  const [selected,    setSelected]    = useState(null);
-  const [aiEval,      setAiEval]      = useState(null);
-  const [scores,      setScores]      = useState({});
-  const [comments,    setComments]    = useState("");
-  const [error,       setError]       = useState("");
-  const [saved,       setSaved]       = useState(false);
-  const [loadingEval, setLoadingEval] = useState(false);
+  const [submissions, setSubmissions]   = useState([]);
+  const [selected,    setSelected]      = useState(null);
+  const [aiEval,      setAiEval]        = useState(null);
+  const [scores,      setScores]        = useState({});
+  const [comments,    setComments]      = useState("");
+  const [error,       setError]         = useState("");
+  const [saved,       setSaved]         = useState(false);
+  const [loadingEval, setLoadingEval]   = useState(false);
+  const [searchQuery, setSearchQuery]   = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const [assignment,      setAssignment]      = useState(null);
   const [badgesByStudent, setBadgesByStudent] = useState({});
@@ -75,7 +74,7 @@ export default function TeacherSubmissions() {
       try {
         const { data } = await assignmentsApi.getAiEvaluation(submission.id);
         setAiEval(data);
-        setScores(data.criteria_scores);
+        setScores(data.criteria_scores || {});
         setComments("");
       } catch {
         setError("Couldn't load AI evaluation.");
@@ -89,6 +88,7 @@ export default function TeacherSubmissions() {
     setScores({ ...scores, [key]: Number(value) });
 
   const handleSubmitReview = async () => {
+    if (!selected) return;
     setError("");
     try {
       await assignmentsApi.reviewSubmission(selected.id, {
@@ -97,7 +97,6 @@ export default function TeacherSubmissions() {
       });
       setSaved(true);
       loadSubmissions();
-      // Refresh selected to reflect new status
       setSelected((prev) => prev ? { ...prev, status: "teacher_reviewed" } : prev);
     } catch (err) {
       setError(err.response?.data?.detail || "Couldn't save review.");
@@ -106,15 +105,25 @@ export default function TeacherSubmissions() {
 
   const totalScore = Object.values(scores).reduce((sum, v) => sum + (Number(v) || 0), 0);
 
-  // Counters for the header summary
+  // Counters for header stats
   const graded    = submissions.filter((s) => s.status === "teacher_reviewed").length;
   const pending   = submissions.filter((s) => s.status === "ai_evaluated").length;
   const failed    = submissions.filter((s) => s.status === "failed").length;
+  const gradedPct = submissions.length > 0 ? Math.round((graded / submissions.length) * 100) : 0;
 
   const handleExtended = () => {
     setShowExtendModal(false);
     loadAssignmentExtras();
   };
+
+  // Filtered student list
+  const filteredSubmissions = submissions.filter((s) => {
+    const nameMatch = (s.student_name || "").toLowerCase().includes(searchQuery.toLowerCase());
+    if (statusFilter === "all") return nameMatch;
+    if (statusFilter === "pending") return nameMatch && s.status === "ai_evaluated";
+    if (statusFilter === "graded") return nameMatch && s.status === "teacher_reviewed";
+    return nameMatch;
+  });
 
   return (
     <Layout>
@@ -127,7 +136,7 @@ export default function TeacherSubmissions() {
             : "")
         }
         action={
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <Btn variant="ghost" onClick={() => setShowHistory(true)}>
               <i className="ti ti-history" style={{ fontSize: "14px" }} />History{history.length > 0 ? ` (${history.length})` : ""}
             </Btn>
@@ -140,49 +149,75 @@ export default function TeacherSubmissions() {
           </div>
         }
       >
-        {/* ── Summary bar ── */}
+        {/* ── Metric Summary Bar ── */}
         {submissions.length > 0 && (
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "20px" }}>
-            <SummaryChip icon="ti-circle-check" label="Graded"  value={graded}  color={C.successText} bg={C.successBg}  border={C.successBorder} />
-            <SummaryChip icon="ti-sparkles"     label="Ready"   value={pending} color={C.infoText}    bg={C.infoBg}     border={C.infoBorder}   />
-            <SummaryChip icon="ti-alert-circle" label="Failed"  value={failed}  color={C.dangerText}  bg={C.dangerBg}   border={C.dangerBorder} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "20px" }}>
+            <MetricCard title="Graded Progress" value={`${gradedPct}%`} sub={`${graded} of ${submissions.length} finalized`} icon="ti-circle-check" color={C.successText} bg={C.successBg} border={C.successBorder} />
+            <MetricCard title="Ready to Grade" value={pending} sub="AI analysis complete" icon="ti-sparkles" color={C.infoText} bg={C.infoBg} border={C.infoBorder} />
+            <MetricCard title="Failed / Issues" value={failed} sub="Needs teacher attention" icon="ti-alert-circle" color={C.dangerText} bg={C.dangerBg} border={C.dangerBorder} />
           </div>
         )}
 
-        {/* ── Main layout: list | detail ── */}
-        <div style={{ display: "grid", gridTemplateColumns: selected ? "280px 1fr" : "1fr", gap: "16px", alignItems: "start" }}>
+        {/* ── Main Layout: Student List | Submission Detail ── */}
+        <div style={{ display: "grid", gridTemplateColumns: selected ? "300px 1fr" : "1fr", gap: "16px", alignItems: "start" }}>
 
-          {/* Left: student list */}
+          {/* Left: Student Submissions Roster */}
           <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
-            <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Students</span>
-              <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "20px", background: C.subtleBg, color: C.textMuted }}>{submissions.length}</span>
+            <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Students</span>
+                <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "20px", background: C.subtleBg, color: C.textMuted }}>{filteredSubmissions.length}</span>
+              </div>
+
+              {/* Search & Status Filters */}
+              <div style={{ position: "relative" }}>
+                <i className="ti ti-search" style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", fontSize: "14px", color: C.textMuted }} />
+                <input
+                  type="text"
+                  placeholder="Search student..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.border}`, borderRadius: "6px", padding: "7px 10px 7px 30px", fontSize: "12px", color: C.textPrimary, outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "4px" }}>
+                {["all", "pending", "graded"].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    style={{ flex: 1, padding: "4px 8px", borderRadius: "5px", border: "none", background: statusFilter === st ? C.primary : C.subtleBg, color: statusFilter === st ? C.primaryText : C.textSecondary, fontSize: "11px", fontWeight: "600", cursor: "pointer", textTransform: "capitalize" }}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {submissions.length === 0 ? (
+            {filteredSubmissions.length === 0 ? (
               <div style={{ padding: "48px 20px", textAlign: "center" }}>
                 <i className="ti ti-inbox" style={{ fontSize: "28px", color: C.border, display: "block", marginBottom: "10px" }} />
                 <p style={{ fontSize: "13px", color: C.textMuted, margin: 0 }}>No submissions yet.</p>
               </div>
             ) : (
-              submissions.map((s, i) => (
+              filteredSubmissions.map((s, i) => (
                 <StudentRow
                   key={s.id}
                   submission={s}
                   badges={badgesByStudent[s.student_id] || []}
                   isSelected={selected?.id === s.id}
-                  isLast={i === submissions.length - 1}
+                  isLast={i === filteredSubmissions.length - 1}
                   onClick={() => openReview(s)}
                 />
               ))
             )}
           </div>
 
-          {/* Right: review detail */}
+          {/* Right: Selected Submission Review */}
           {selected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", minWidth: 0 }}>
 
-              {/* Student header card */}
+              {/* Student Header Card */}
               <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                   <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: C.subtleBg, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -194,17 +229,21 @@ export default function TeacherSubmissions() {
                     <p style={{ fontSize: "16px", fontWeight: "600", color: C.textPrimary, margin: 0 }}>
                       {selected.student_name || `Student #${selected.student_id}`}
                     </p>
-                    <StatusPill status={selected.status} />
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                      <StatusPill status={selected.status} />
+                      <span style={{ fontSize: "11px", color: C.textMuted }}>Submitted: {new Date(selected.submitted_at).toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
-                {/* PDF actions */}
+
+                {/* PDF Actions */}
                 <div style={{ display: "flex", gap: "8px" }}>
                   <ActionBtn icon="ti-eye"      label="View PDF"    onClick={() => assignmentsApi.viewSubmissionFile(selected.id)} />
                   <ActionBtn icon="ti-download" label="Download"    onClick={() => assignmentsApi.downloadSubmissionFile(selected.id)} />
                 </div>
               </div>
 
-              {/* Error / saved */}
+              {/* Banners */}
               {error && <InlineBanner variant="error">{error}</InlineBanner>}
               {saved  && <InlineBanner variant="success">Grade saved successfully.</InlineBanner>}
 
@@ -217,7 +256,7 @@ export default function TeacherSubmissions() {
                 />
               )}
 
-              {/* OCR text */}
+              {/* OCR Text */}
               {selected.extracted_text && selected.extraction_method === "ocr" && (
                 <OCRBlock
                   text={selected.extracted_text}
@@ -225,12 +264,12 @@ export default function TeacherSubmissions() {
                 />
               )}
 
-              {/* Failed */}
+              {/* Failed state */}
               {selected.status === "failed" && (
                 <InlineBanner variant="error">{selected.error_message || "AI evaluation failed for this submission."}</InlineBanner>
               )}
 
-              {/* Processing */}
+              {/* Processing state */}
               {!aiEval && !loadingEval && selected.status !== "failed" && !["ai_evaluated", "teacher_reviewed"].includes(selected.status) && (
                 <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "32px", textAlign: "center" }}>
                   <i className="ti ti-loader-2" style={{ fontSize: "28px", color: C.textMuted, display: "block", marginBottom: "10px", animation: "spin 1s linear infinite" }} />
@@ -246,11 +285,11 @@ export default function TeacherSubmissions() {
                 </div>
               )}
 
-              {/* Main review: two columns — AI feedback | Scoring */}
+              {/* Main Review Grid: AI Feedback | Rubric Scoring */}
               {aiEval && !loadingEval && (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px", alignItems: "start" }}>
 
-                  {/* AI feedback */}
+                  {/* Left Column: AI Feedback */}
                   <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
                     <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
                       <i className="ti ti-sparkles" style={{ fontSize: "15px", color: C.infoText }} />
@@ -261,7 +300,7 @@ export default function TeacherSubmissions() {
                     </div>
                   </div>
 
-                  {/* Scoring + approve */}
+                  {/* Right Column: Scoring & Final Approval */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <ScoreCard
                       scores={scores}
@@ -275,8 +314,11 @@ export default function TeacherSubmissions() {
                       alreadyGraded={selected.status === "teacher_reviewed"}
                     />
                     {selected.status !== "teacher_reviewed" ? (
-                      <button onClick={handleSubmitReview}
-                        style={{ width: "100%", padding: "13px", borderRadius: "8px", border: "none", background: C.primary, color: "#fff", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                      <button
+                        onClick={handleSubmitReview}
+                        className="btn-interactive"
+                        style={{ width: "100%", padding: "13px", borderRadius: "8px", border: "none", background: C.primary, color: C.primaryText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                      >
                         <i className="ti ti-check" style={{ fontSize: "16px" }} />Approve & finalize grade
                       </button>
                     ) : (
@@ -286,11 +328,6 @@ export default function TeacherSubmissions() {
                 </div>
               )}
             </div>
-          )}
-
-          {/* Placeholder when nothing selected and list is visible */}
-          {!selected && submissions.length > 0 && (
-            <div style={{ display: "none" }} /> // grid only shows one column when !selected
           )}
         </div>
 
@@ -313,146 +350,20 @@ export default function TeacherSubmissions() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Extend Deadline modal
-// ─────────────────────────────────────────────────────────────────────────────
-function toLocalInputValue(isoString) {
-  if (!isoString) return "";
-  const d = new Date(isoString);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function ModalOverlay({ children, onClose }) {
-  return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}
-    >
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "440px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function ExtendDeadlineModal({ assignmentId, currentDueDate, onClose, onExtended }) {
-  const [newDueDate, setNewDueDate] = useState(toLocalInputValue(currentDueDate));
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    if (!newDueDate) { setError("Please choose a new due date."); return; }
-    setError("");
-    setSaving(true);
-    try {
-      await assignmentsApi.extendDeadline(assignmentId, new Date(newDueDate).toISOString(), reason || undefined);
-      onExtended();
-    } catch (err) {
-      setError(err.response?.data?.detail || "Couldn't update the deadline.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalOverlay onClose={onClose}>
-      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary }}>Extend Deadline</span>
-        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
-          <i className="ti ti-x" style={{ fontSize: "16px" }} />
-        </button>
-      </div>
-      <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
-        {error && <InlineBanner variant="error">{error}</InlineBanner>}
-        {currentDueDate && (
-          <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
-            Current deadline: {new Date(currentDueDate).toLocaleString()}
-          </p>
-        )}
-        <div>
-          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>New due date & time</label>
-          <input
-            type="datetime-local"
-            value={newDueDate}
-            onChange={(e) => setNewDueDate(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none" }}
-          />
-        </div>
-        <div>
-          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>Reason <span style={{ fontWeight: "400", color: C.textMuted }}>(optional)</span></label>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={3}
-            placeholder="e.g. Extended due to server downtime"
-            style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical" }}
-          />
-        </div>
-      </div>
-      <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          style={{ padding: "9px 16px", borderRadius: "7px", border: "none", background: C.primary, color: "#fff", fontSize: "13px", fontWeight: "600", fontFamily: "inherit", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1, display: "flex", alignItems: "center", gap: "6px" }}
-        >
-          <i className="ti ti-check" style={{ fontSize: "14px" }} />{saving ? "Saving…" : "Save deadline"}
-        </button>
-      </div>
-    </ModalOverlay>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Deadline history modal
-// ─────────────────────────────────────────────────────────────────────────────
-function DeadlineHistoryModal({ history, onClose }) {
-  return (
-    <ModalOverlay onClose={onClose}>
-      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary }}>Deadline Extension History</span>
-        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
-          <i className="ti ti-x" style={{ fontSize: "16px" }} />
-        </button>
-      </div>
-      <div style={{ padding: history.length ? "8px 0" : "32px 20px", textAlign: history.length ? "left" : "center" }}>
-        {history.length === 0 ? (
-          <>
-            <i className="ti ti-clock-off" style={{ fontSize: "26px", color: C.border, display: "block", marginBottom: "8px" }} />
-            <p style={{ fontSize: "13px", color: C.textMuted, margin: 0 }}>No deadline changes yet.</p>
-          </>
-        ) : (
-          history.map((h, i) => (
-            <div key={h.id} style={{ padding: "12px 20px", borderBottom: i === history.length - 1 ? "none" : `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", marginBottom: "4px" }}>
-                <span style={{ color: C.textMuted, textDecoration: "line-through" }}>
-                  {h.previous_due_date ? new Date(h.previous_due_date).toLocaleString() : "No deadline"}
-                </span>
-                <i className="ti ti-arrow-right" style={{ fontSize: "12px", color: C.textMuted }} />
-                <span style={{ fontWeight: "600", color: C.textPrimary }}>{new Date(h.new_due_date).toLocaleString()}</span>
-              </div>
-              <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
-                By {h.updated_by} · {new Date(h.updated_at).toLocaleString()}
-              </p>
-              {h.reason && <p style={{ fontSize: "12px", color: C.textSecondary, margin: "4px 0 0" }}>"{h.reason}"</p>}
-            </div>
-          ))
-        )}
-      </div>
-    </ModalOverlay>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SummaryChip({ icon, label, value, color, bg, border }) {
+function MetricCard({ title, value, sub, icon, color, bg, border }) {
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 12px", borderRadius: "20px", background: bg, border: `1px solid ${border}` }}>
-      <i className={`ti ${icon}`} style={{ fontSize: "13px", color }} />
-      <span style={{ fontSize: "12px", fontWeight: "600", color }}>{value} {label}</span>
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "12px 14px", display: "flex", alignItems: "center", gap: "12px", borderLeft: `3px solid ${color}` }}>
+      <div style={{ width: "34px", height: "34px", borderRadius: "6px", background: bg, border: `1px solid ${border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <i className={`ti ${icon}`} style={{ fontSize: "16px", color }} />
+      </div>
+      <div>
+        <p style={{ fontSize: "11px", fontWeight: "600", color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 2px" }}>{title}</p>
+        <span style={{ fontSize: "18px", fontWeight: "700", color: C.textPrimary }}>{value}</span>
+        <span style={{ fontSize: "11px", color: C.textMuted, display: "block", marginTop: "1px" }}>{sub}</span>
+      </div>
     </div>
   );
 }
@@ -460,9 +371,8 @@ function SummaryChip({ icon, label, value, color, bg, border }) {
 function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick }) {
   const [hovered, setHovered] = useState(false);
 
-  // CTA config per status
   const cta = {
-    ai_evaluated:     { label: "Review & grade", icon: "ti-clipboard-check", style: { background: C.primary, color: "#fff", border: "none" } },
+    ai_evaluated:     { label: "Review & grade", icon: "ti-clipboard-check", style: { background: C.primary, color: C.primaryText, border: "none" } },
     teacher_reviewed: { label: "View grade",     icon: "ti-eye",             style: { background: "transparent", color: C.textSecondary, border: `1px solid ${C.border}` } },
     failed:           { label: "View details",   icon: "ti-eye",             style: { background: "transparent", color: C.dangerText, border: `1px solid ${C.dangerBorder}` } },
     processing:       { label: "AI evaluating…", icon: "ti-loader-2",        style: { background: "transparent", color: C.textMuted, border: `1px solid ${C.border}`, cursor: "not-allowed", opacity: 0.6 }, disabled: true },
@@ -476,12 +386,11 @@ function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick })
       style={{
         display: "flex", alignItems: "center", gap: "10px",
         padding: "11px 16px", borderBottom: isLast ? "none" : `1px solid ${C.border}`,
-        background: isSelected ? C.subtleBg : hovered ? "#FAFAFA" : "none",
+        background: isSelected ? C.subtleBg : hovered ? C.subtleBg : "none",
         borderLeft: isSelected ? `3px solid ${C.primary}` : "3px solid transparent",
         transition: "background 0.1s",
       }}
     >
-      {/* Student name — clicking the name/row area also opens review */}
       <div onClick={!cta.disabled ? onClick : undefined}
         style={{ minWidth: 0, flex: 1, cursor: cta.disabled ? "default" : "pointer" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
@@ -494,7 +403,6 @@ function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick })
         </div>
       </div>
 
-      {/* Plagiarism Badge */}
       {s.plagiarism_score !== null && s.plagiarism_score !== undefined && s.plagiarism_score > 0 && (
         <span style={{
           fontSize: "11px", fontWeight: "600", padding: "2px 6px", borderRadius: "12px",
@@ -509,17 +417,16 @@ function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick })
 
       <StatusPill status={s.status} />
 
-      {/* Explicit CTA button — the key UX improvement */}
       <button
         onClick={!cta.disabled ? onClick : undefined}
         disabled={cta.disabled}
+        className="btn-interactive"
         style={{
           display: "inline-flex", alignItems: "center", gap: "5px",
           padding: "6px 11px", borderRadius: "6px",
           fontSize: "12px", fontWeight: "500", fontFamily: "inherit",
           cursor: cta.disabled ? "not-allowed" : "pointer",
           whiteSpace: "nowrap", flexShrink: 0,
-          transition: "opacity 0.1s",
           ...cta.style,
         }}
       >
@@ -539,7 +446,7 @@ function StatusPill({ status }) {
     failed:           { bg: C.dangerBg,  txt: C.dangerText,  label: "Failed",     icon: "ti-alert-circle"  },
   }[status] || { bg: C.subtleBg, txt: C.textMuted, label: status, icon: "ti-circle" };
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "600", padding: "3px 8px", borderRadius: "20px", background: map.bg, color: map.txt, whiteSpace: "nowrap", flexShrink: 0, marginLeft: "8px" }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "600", padding: "3px 8px", borderRadius: "20px", background: map.bg, color: map.txt, whiteSpace: "nowrap", flexShrink: 0, marginLeft: "4px" }}>
       <i className={`ti ${map.icon}`} style={{ fontSize: "11px" }} />
       {map.label}
     </span>
@@ -547,58 +454,180 @@ function StatusPill({ status }) {
 }
 
 function ActionBtn({ icon, label, onClick }) {
-  const [hovered, setHovered] = useState(false);
   return (
     <button
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "6px", border: `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, color: C.textSecondary, fontSize: "13px", fontWeight: "500", fontFamily: "inherit", cursor: "pointer", transition: "background 0.1s" }}
+      className="btn-interactive"
+      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "6px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textPrimary, fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
     >
-      <i className={`ti ${icon}`} style={{ fontSize: "13px" }} />{label}
+      <i className={`ti ${icon}`} style={{ fontSize: "15px" }} />
+      {label}
     </button>
   );
 }
 
 function InlineBanner({ children, variant = "error" }) {
-  const v = {
-    error:   { bg: C.dangerBg,  txt: C.dangerText,  border: C.dangerBorder,  icon: "ti-alert-circle"  },
-    success: { bg: C.successBg, txt: C.successText, border: C.successBorder, icon: "ti-circle-check"  },
-    info:    { bg: C.infoBg,    txt: C.infoText,    border: C.infoBorder,    icon: "ti-info-circle"   },
-  }[variant];
+  const isErr = variant === "error";
   return (
-    <div style={{ background: v.bg, color: v.txt, border: `1px solid ${v.border}`, borderRadius: "7px", padding: "11px 14px", fontSize: "13px", display: "flex", gap: "8px", alignItems: "flex-start" }}>
-      <i className={`ti ${v.icon}`} style={{ fontSize: "15px", flexShrink: 0, marginTop: "1px" }} />
-      <span>{children}</span>
+    <div style={{ background: isErr ? C.dangerBg : C.successBg, border: `1px solid ${isErr ? C.dangerBorder : C.successBorder}`, borderRadius: "8px", padding: "12px 16px", fontSize: "13px", color: isErr ? C.dangerText : C.successText, display: "flex", alignItems: "center", gap: "8px" }}>
+      <i className={`ti ${isErr ? "ti-alert-circle" : "ti-circle-check"}`} style={{ fontSize: "16px", flexShrink: 0 }} />
+      {children}
+    </div>
+  );
+}
+
+function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
+  const [report, setReport]           = useState(null);
+  const [loading, setLoading]         = useState(true);
+  const [recomputing, setRecomputing] = useState(false);
+  const [expanded, setExpanded]       = useState(false);
+
+  const fetchReport = useCallback(async () => {
+    if (!submissionId) return;
+    setLoading(true);
+    try {
+      const { data } = await assignmentsApi.getPlagiarismReport(submissionId);
+      setReport(data);
+    } catch {
+      setReport(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [submissionId]);
+
+  useEffect(() => {
+    fetchReport();
+  }, [fetchReport]);
+
+  const handleRecompute = async () => {
+    if (!assignmentId) return;
+    setRecomputing(true);
+    try {
+      await assignmentsApi.recomputePlagiarism(assignmentId);
+      await fetchReport();
+      if (onRecomputed) onRecomputed();
+    } catch {
+      /* ignore */
+    } finally {
+      setRecomputing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "16px", textAlign: "center" }}>
+        <i className="ti ti-loader-2" style={{ fontSize: "22px", color: C.accent, animation: "spin 1s linear infinite", marginBottom: "6px" }} />
+        <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>Checking plagiarism report…</p>
+      </div>
+    );
+  }
+
+  if (!report) return null;
+
+  const isHigh   = (report.risk_level || "").toUpperCase() === "HIGH";
+  const isMedium = (report.risk_level || "").toUpperCase() === "MEDIUM";
+
+  const riskColor = isHigh ? C.dangerText : isMedium ? C.warningText : C.successText;
+  const riskBg = isHigh ? C.dangerBg : isMedium ? C.warningBg : C.successBg;
+  const riskBorder = isHigh ? C.dangerBorder : isMedium ? C.warningBorder : C.successBorder;
+  const totalScore = (report.percentage_score ?? (report.similarity_score * 100) ?? 0).toFixed(1);
+
+  return (
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "16px", marginBottom: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <i className="ti ti-shield-search" style={{ fontSize: "18px", color: C.accent }} />
+          <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>Plagiarism Analysis</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            onClick={handleRecompute}
+            disabled={recomputing}
+            className="btn-interactive"
+            style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "4px 8px", borderRadius: "6px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary, fontSize: "11px", fontWeight: "600", cursor: recomputing ? "not-allowed" : "pointer" }}
+          >
+            <i className={`ti ${recomputing ? "ti-loader-2" : "ti-refresh"}`} style={{ fontSize: "12px", animation: recomputing ? "spin 1s linear infinite" : "none" }} />
+            Recheck
+          </button>
+          <span style={{ fontSize: "11px", fontWeight: "700", padding: "3px 8px", borderRadius: "12px", background: riskBg, color: riskColor, border: `1px solid ${riskBorder}` }}>
+            {(report.risk_level || "LOW").toUpperCase()} RISK ({totalScore}%)
+          </span>
+        </div>
+      </div>
+
+      <div style={{ background: C.infoBg, border: `1px solid ${C.infoBorder}`, borderRadius: "6px", padding: "8px 10px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "7px", fontSize: "11px", color: C.infoText, lineHeight: "1.4" }}>
+        <i className="ti ti-info-circle" style={{ fontSize: "14px", flexShrink: 0 }} />
+        <span>Similarity findings inform grading decisions but do not mandate a penalty. Evaluate assignment mastery & originality directly.</span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+        <div style={{ background: C.subtleBg, padding: "8px 10px", borderRadius: "6px" }}>
+          <span style={{ fontSize: "11px", color: C.textMuted, display: "block" }}>TF-IDF Similarity</span>
+          <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>{((report.tfidf_score || 0) * 100).toFixed(1)}%</span>
+        </div>
+        <div style={{ background: C.subtleBg, padding: "8px 10px", borderRadius: "6px" }}>
+          <span style={{ fontSize: "11px", color: C.textMuted, display: "block" }}>Shingle Overlap</span>
+          <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>{((report.shingle_score || 0) * 100).toFixed(1)}%</span>
+        </div>
+      </div>
+
+      {report.summary && (
+        <p style={{ fontSize: "12px", color: C.textSecondary, margin: "0 0 12px", lineHeight: "1.5" }}>
+          {report.summary}
+        </p>
+      )}
+
+      {report.matching_spans && report.matching_spans.length > 0 ? (
+        <div style={{ marginTop: "10px" }}>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{ width: "100%", background: "none", border: `1px solid ${C.border}`, borderRadius: "6px", padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontSize: "12px", color: C.textPrimary, fontWeight: "600" }}
+          >
+            <span><i className="ti ti-highlight" style={{ marginRight: "6px", color: C.warningText }} />{report.matching_spans.length} Highlighted Matching Text Section{report.matching_spans.length > 1 ? "s" : ""}</span>
+            <i className={`ti ${expanded ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "13px" }} />
+          </button>
+          {expanded && (
+            <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" }}>
+              {report.matching_spans.map((span, idx) => (
+                <div key={idx} style={{ background: C.warningBg, border: `1px solid ${C.warningBorder}`, borderRadius: "6px", padding: "9px 12px", fontSize: "12px", color: C.textPrimary }}>
+                  <p style={{ margin: 0, fontStyle: "italic", lineHeight: "1.4", wordBreak: "break-word" }}>"{span.text}"</p>
+                  <span style={{ fontSize: "10px", color: C.textMuted, display: "block", marginTop: "4px" }}>
+                    Matching section length: {span.length} characters (Position {span.source_start}–{span.source_end})
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ background: C.subtleBg, border: `1px dashed ${C.border}`, borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: C.textMuted, lineHeight: "1.4" }}>
+          No direct text overlap passages detected.
+        </div>
+      )}
     </div>
   );
 }
 
 function OCRBlock({ text, confidence }) {
-  const [expanded, setExpanded] = useState(false);
-  const confColor = confidence < 40 ? C.dangerText : confidence < 70 ? C.warningText : C.successText;
-  const confBg    = confidence < 40 ? C.dangerBg   : confidence < 70 ? C.warningBg   : C.successBg;
-  const confBdr   = confidence < 40 ? C.dangerBorder: confidence < 70 ? C.warningBorder: C.successBorder;
+  const [open, setOpen] = useState(false);
   return (
     <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
       <button
-        onClick={() => setExpanded(!expanded)}
-        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
+        onClick={() => setOpen(!open)}
+        style={{ width: "100%", padding: "12px 16px", background: "none", border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontFamily: "inherit" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <i className="ti ti-scan" style={{ fontSize: "14px", color: C.textMuted }} />
-          <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>OCR Extracted Text</span>
-          {confidence !== null && confidence !== undefined && (
-            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 7px", borderRadius: "20px", background: confBg, color: confColor, border: `1px solid ${confBdr}` }}>
-              {confidence}% confidence
-            </span>
+          <i className="ti ti-scan" style={{ fontSize: "16px", color: C.accent }} />
+          <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Extracted OCR Text</span>
+          {confidence !== undefined && (
+            <span style={{ fontSize: "11px", color: C.textMuted }}>({Math.round(confidence * 100)}% confidence)</span>
           )}
         </div>
-        <i className={`ti ${expanded ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "14px", color: C.textMuted }} />
+        <i className={`ti ${open ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "14px", color: C.textMuted }} />
       </button>
-      {expanded && (
-        <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px" }}>
-          <pre style={{ fontSize: "12px", color: C.textPrimary, lineHeight: "1.6", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, maxHeight: "200px", overflowY: "auto", fontFamily: "inherit" }}>
+      {open && (
+        <div style={{ padding: "0 16px 14px", borderTop: `1px solid ${C.border}` }}>
+          <pre style={{ fontSize: "12px", color: C.textSecondary, background: C.subtleBg, padding: "12px", borderRadius: "6px", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontFamily: "monospace" }}>
             {text}
           </pre>
         </div>
@@ -607,73 +636,8 @@ function OCRBlock({ text, confidence }) {
   );
 }
 
-function ScoreCard({ scores, totalScore, onScoreChange, alreadyGraded }) {
-  return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
-      <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
-        <i className="ti ti-clipboard-check" style={{ fontSize: "15px", color: C.textMuted }} />
-        <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Scores</span>
-        {alreadyGraded && (
-          <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "600", color: C.successText, background: C.successBg, padding: "2px 8px", borderRadius: "20px", border: `1px solid ${C.successBorder}` }}>
-            Finalized
-          </span>
-        )}
-      </div>
-      <div style={{ padding: "14px 16px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {Object.entries(scores).map(([key, value]) => (
-            <div key={key} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <label style={{ flex: 1, fontSize: "13px", color: C.textPrimary, textTransform: "capitalize", fontWeight: "500" }}>
-                {key.replace(/_/g, " ")}
-              </label>
-              <input
-                type="number" min="0"
-                value={value}
-                disabled={alreadyGraded}
-                onChange={(e) => onScoreChange(key, e.target.value)}
-                style={{ width: "64px", background: alreadyGraded ? C.subtleBg : C.cardBg, border: `1.5px solid ${C.border}`, borderRadius: "6px", padding: "6px 8px", fontSize: "14px", fontWeight: "600", color: C.textPrimary, fontFamily: "inherit", outline: "none", textAlign: "center", cursor: alreadyGraded ? "default" : "text" }}
-                onFocus={(e) => { if (!alreadyGraded) { e.target.style.borderColor = C.focusBorder; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; } }}
-                onBlur={(e)  => { e.target.style.borderColor = C.border; e.target.style.boxShadow = "none"; }}
-              />
-            </div>
-          ))}
-        </div>
-        {/* Total */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", paddingTop: "12px", borderTop: `2px solid ${C.border}` }}>
-          <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary }}>Total</span>
-          <span style={{ fontSize: "22px", fontWeight: "800", letterSpacing: "-0.03em", color: C.textPrimary }}>{totalScore}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CommentsCard({ value, onChange, alreadyGraded }) {
-  return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
-      <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
-        <i className="ti ti-message" style={{ fontSize: "15px", color: C.textMuted }} />
-        <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Your Comments</span>
-        <span style={{ fontSize: "11px", color: C.textMuted, marginLeft: "2px" }}>(optional)</span>
-      </div>
-      <div style={{ padding: "12px 16px" }}>
-        <textarea
-          value={value}
-          disabled={alreadyGraded}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          placeholder="Add anything the AI feedback missed…"
-          style={{ width: "100%", background: alreadyGraded ? C.subtleBg : C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", cursor: alreadyGraded ? "default" : "text" }}
-          onFocus={(e) => { if (!alreadyGraded) { e.target.style.borderColor = C.focusBorder; e.target.style.background = "#fff"; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; } }}
-          onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = alreadyGraded ? C.subtleBg : C.inputBg; e.target.style.boxShadow = "none"; }}
-        />
-      </div>
-    </div>
-  );
-}
-
 function AIFeedback({ eval_ }) {
-  let feedback;
+  let feedback = null;
   try {
     feedback = typeof eval_.feedback === "string" ? JSON.parse(eval_.feedback) : eval_.feedback;
   } catch {
@@ -748,171 +712,194 @@ function AIFeedback({ eval_ }) {
   );
 }
 
-function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [recomputing, setRecomputing] = useState(false);
-  const [expanded, setExpanded] = useState(true);
-  const [showDebug, setShowDebug] = useState(false);
-
-  const fetchReport = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const { data } = await assignmentsApi.getPlagiarismReport(submissionId);
-      setReport(data);
-    } catch {
-      setError("Could not load plagiarism report.");
-    } finally {
-      setLoading(false);
-    }
-  }, [submissionId]);
-
-  useEffect(() => {
-    fetchReport();
-  }, [fetchReport]);
-
-  const handleRecompute = async () => {
-    setRecomputing(true);
-    try {
-      await assignmentsApi.recomputePlagiarism(assignmentId);
-      await fetchReport();
-      if (onRecomputed) onRecomputed();
-    } catch {
-      alert("Failed to recompute plagiarism.");
-    } finally {
-      setRecomputing(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, padding: "16px", textAlign: "center" }}>
-        <i className="ti ti-loader-2" style={{ fontSize: "20px", color: C.textMuted, animation: "spin 1s linear infinite" }} />
-      </div>
-    );
-  }
-
-  if (error || !report) return null;
-
-  const riskColor = report.risk_level === "high" ? C.dangerText : report.risk_level === "medium" ? C.warningText : C.successText;
-  const riskBg = report.risk_level === "high" ? C.dangerBg : report.risk_level === "medium" ? C.warningBg : C.successBg;
-  const riskBorder = report.risk_level === "high" ? C.dangerBorder : report.risk_level === "medium" ? C.warningBorder : C.successBorder;
-
-  const confLevel = report.confidence_level || "medium";
-  const confColor = confLevel === "high" ? C.textPrimary : confLevel === "medium" ? C.textSecondary : C.textMuted;
-  const confBg = C.subtleBg;
-
+function ScoreCard({ scores, totalScore, onScoreChange, alreadyGraded }) {
   return (
     <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
-      {/* Header Bar */}
-      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-          <i className="ti ti-shield-check" style={{ fontSize: "16px", color: riskColor }} />
-          <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Plagiarism Analysis</span>
-          {/* Risk Level Badge & Plagiarism Percentage */}
-          <span style={{ fontSize: "11px", fontWeight: "700", padding: "3px 8px", borderRadius: "20px", background: riskBg, color: riskColor, border: `1px solid ${riskBorder}` }}>
-            {report.risk_level.toUpperCase()} RISK ({report.percentage_score}%)
+      <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
+        <i className="ti ti-clipboard-check" style={{ fontSize: "15px", color: C.textMuted }} />
+        <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Scores</span>
+        {alreadyGraded && (
+          <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "600", color: C.successText, background: C.successBg, padding: "2px 8px", borderRadius: "20px", border: `1px solid ${C.successBorder}` }}>
+            Finalized
           </span>
-          {/* Confidence Level Badge */}
-          <span style={{ fontSize: "10px", fontWeight: "600", padding: "2px 7px", borderRadius: "20px", background: confBg, color: confColor, border: `1px solid ${C.border}` }} title="Confidence level based on direct text evidence vs semantic similarity">
-            {confLevel.toUpperCase()} CONFIDENCE
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: "6px" }}>
-          {/* Debug view toggle for developers/admins */}
-          <button
-            onClick={() => setShowDebug(!showDebug)}
-            style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: "5px", padding: "4px 7px", fontSize: "10px", fontWeight: "500", color: C.textMuted, cursor: "pointer" }}
-            title="Toggle Technical Engine Metrics (TF-IDF, Shingles, Vectors)"
-          >
-            {showDebug ? "Hide Debug" : "Debug Info"}
-          </button>
-          <button
-            onClick={handleRecompute}
-            disabled={recomputing}
-            style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: "5px", padding: "4px 8px", fontSize: "11px", fontWeight: "500", color: C.textSecondary, cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
-          >
-            <i className={`ti ${recomputing ? "ti-loader-2" : "ti-refresh"}`} style={{ fontSize: "12px", animation: recomputing ? "spin 1s linear infinite" : "none" }} />
-            {recomputing ? "Recomputing…" : "Recompute"}
-          </button>
-        </div>
+        )}
       </div>
-
-      <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-        {/* Teacher Guidance Banner */}
-        <div style={{ background: C.infoBg, border: `1px solid ${C.infoBorder}`, borderRadius: "6px", padding: "9px 12px", display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: C.infoText }}>
-          <i className="ti ti-info-circle" style={{ flexShrink: 0, fontSize: "15px" }} />
-          <span><strong>Teacher Guidance:</strong> Similarity findings inform grading but do not mandate penalty. Evaluate mastery & originality directly.</span>
+      <div style={{ padding: "14px 16px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {Object.entries(scores).map(([key, value]) => (
+            <div key={key} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <label style={{ flex: 1, fontSize: "13px", color: C.textPrimary, textTransform: "capitalize", fontWeight: "500" }}>
+                {key.replace(/_/g, " ")}
+              </label>
+              <input
+                type="number" min="0"
+                value={value}
+                disabled={alreadyGraded}
+                onChange={(e) => onScoreChange(key, e.target.value)}
+                style={{ width: "64px", background: alreadyGraded ? C.subtleBg : C.inputBg, border: `1.5px solid ${C.border}`, borderRadius: "6px", padding: "6px 8px", fontSize: "14px", fontWeight: "600", color: C.textPrimary, fontFamily: "inherit", outline: "none", textAlign: "center", cursor: alreadyGraded ? "default" : "text" }}
+                onFocus={(e) => { if (!alreadyGraded) { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; } }}
+                onBlur={(e)  => { e.target.style.borderColor = C.border; e.target.style.background = alreadyGraded ? C.subtleBg : C.inputBg; e.target.style.boxShadow = "none"; }}
+              />
+            </div>
+          ))}
         </div>
-
-        {/* AI-generated Plagiarism Summary */}
-        {report.summary && (
-          <div style={{ background: C.subtleBg, borderRadius: "6px", padding: "10px 12px", border: `1px solid ${C.border}` }}>
-            <p style={{ fontSize: "12px", color: C.textPrimary, margin: 0, lineHeight: "1.5" }}>
-              <i className="ti ti-sparkles" style={{ marginRight: "6px", color: C.infoText }} />
-              <strong>AI Summary:</strong> {report.summary}
-            </p>
-          </div>
-        )}
-
-        {/* Matched Student */}
-        <div style={{ background: "#FAFBFD", padding: "10px 12px", borderRadius: "6px", border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "11px", color: C.textMuted, fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.05em" }}>Matched Student</span>
-          <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary }}>
-            {report.matched_student_name || "Original Work"}
-          </span>
+        {/* Total */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", paddingTop: "12px", borderTop: `2px solid ${C.border}` }}>
+          <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary }}>Total</span>
+          <span style={{ fontSize: "22px", fontWeight: "800", letterSpacing: "-0.03em", color: C.textPrimary }}>{totalScore}</span>
         </div>
-
-        {/* Optional Developer / Debug View */}
-        {showDebug && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", padding: "8px", background: "#F8FAFC", borderRadius: "6px", border: `1px dashed ${C.border}` }}>
-            <div style={{ textAlign: "center" }}>
-              <span style={{ display: "block", fontSize: "9px", color: C.textMuted, fontWeight: "600" }}>TF-IDF COSINE</span>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>{Math.round((report.tfidf_score || 0) * 100)}%</span>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <span style={{ display: "block", fontSize: "9px", color: C.textMuted, fontWeight: "600" }}>SHINGLE OVERLAP</span>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>{Math.round((report.shingle_score || 0) * 100)}%</span>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <span style={{ display: "block", fontSize: "9px", color: C.textMuted, fontWeight: "600" }}>SEMANTIC VECTOR</span>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>{Math.round((report.semantic_score || 0) * 100)}%</span>
-            </div>
-          </div>
-        )}
-
-        {/* Highlighted Matching Text Evidence */}
-        {report.matching_spans && report.matching_spans.length > 0 ? (
-          <div style={{ marginTop: "4px" }}>
-            <button
-              onClick={() => setExpanded(!expanded)}
-              style={{ width: "100%", background: "none", border: `1px solid ${C.border}`, borderRadius: "6px", padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontSize: "12px", color: C.textPrimary, fontWeight: "600" }}
-            >
-              <span><i className="ti ti-highlight" style={{ marginRight: "6px", color: C.warningText }} />{report.matching_spans.length} Highlighted Matching Text Section{report.matching_spans.length > 1 ? "s" : ""}</span>
-              <i className={`ti ${expanded ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "13px" }} />
-            </button>
-            {expanded && (
-              <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" }}>
-                {report.matching_spans.map((span, idx) => (
-                  <div key={idx} style={{ background: "#FFFBEB", border: `1px solid ${C.warningBorder}`, borderRadius: "6px", padding: "9px 12px", fontSize: "12px", color: C.textPrimary }}>
-                    <p style={{ margin: 0, fontStyle: "italic", lineHeight: "1.4", wordBreak: "break-word" }}>"{span.text}"</p>
-                    <span style={{ fontSize: "10px", color: C.textMuted, display: "block", marginTop: "4px" }}>
-                      Matching section length: {span.length} characters (Position {span.source_start}–{span.source_end})
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ background: "#F8FAFC", border: `1px dashed ${C.border}`, borderRadius: "6px", padding: "10px 12px", fontSize: "12px", color: C.textMuted, lineHeight: "1.4" }}>
-            <i className="ti ti-info-circle" style={{ marginRight: "6px", color: C.textSecondary }} />
-            No direct matching passages were found. Similarity score is based primarily on semantic analysis.
-          </div>
-        )}
       </div>
     </div>
   );
-}
+}
+
+function CommentsCard({ value, onChange, alreadyGraded }) {
+  return (
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+      <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
+        <i className="ti ti-message" style={{ fontSize: "15px", color: C.textMuted }} />
+        <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Your Comments</span>
+        <span style={{ fontSize: "11px", color: C.textMuted, marginLeft: "2px" }}>(optional)</span>
+      </div>
+      <div style={{ padding: "12px 16px" }}>
+        <textarea
+          value={value}
+          disabled={alreadyGraded}
+          onChange={(e) => onChange(e.target.value)}
+          rows={3}
+          placeholder="Add anything the AI feedback missed…"
+          style={{ width: "100%", background: alreadyGraded ? C.subtleBg : C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", cursor: alreadyGraded ? "default" : "text" }}
+          onFocus={(e) => { if (!alreadyGraded) { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; } }}
+          onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = alreadyGraded ? C.subtleBg : C.inputBg; e.target.style.boxShadow = "none"; }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ExtendDeadlineModal({ assignmentId, currentDueDate, onClose, onExtended }) {
+  const [newDueDate, setNewDueDate] = useState(toLocalInputValue(currentDueDate));
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!newDueDate) { setError("Please choose a new due date."); return; }
+    setError("");
+    setSaving(true);
+    try {
+      await assignmentsApi.extendDeadline(assignmentId, new Date(newDueDate).toISOString(), reason || undefined);
+      onExtended();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Couldn't update the deadline.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary }}>Extend Deadline</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
+          <i className="ti ti-x" style={{ fontSize: "16px" }} />
+        </button>
+      </div>
+      <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+        {error && <InlineBanner variant="error">{error}</InlineBanner>}
+        {currentDueDate && (
+          <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
+            Current deadline: {new Date(currentDueDate).toLocaleString()}
+          </p>
+        )}
+        <div>
+          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>New due date & time</label>
+          <input
+            type="datetime-local"
+            value={newDueDate}
+            onChange={(e) => setNewDueDate(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: `1px solid ${C.border}`, borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none" }}
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>Reason <span style={{ fontWeight: "400", color: C.textMuted }}>(optional)</span></label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="e.g. Extended due to server downtime"
+            style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: `1px solid ${C.border}`, borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical" }}
+          />
+        </div>
+      </div>
+      <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="btn-interactive"
+          style={{ padding: "9px 16px", borderRadius: "7px", border: "none", background: C.primary, color: C.primaryText, fontSize: "13px", fontWeight: "600", fontFamily: "inherit", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1, display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          <i className="ti ti-check" style={{ fontSize: "14px" }} />{saving ? "Saving…" : "Save deadline"}
+        </button>
+      </div>
+    </ModalOverlay>
+  );
+}
+
+function DeadlineHistoryModal({ history, onClose }) {
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary }}>Deadline Extension History</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
+          <i className="ti ti-x" style={{ fontSize: "16px" }} />
+        </button>
+      </div>
+      <div style={{ padding: history.length ? "8px 0" : "32px 20px", textAlign: history.length ? "left" : "center" }}>
+        {history.length === 0 ? (
+          <>
+            <i className="ti ti-clock-off" style={{ fontSize: "26px", color: C.border, display: "block", marginBottom: "8px" }} />
+            <p style={{ fontSize: "13px", color: C.textMuted, margin: 0 }}>No deadline changes yet.</p>
+          </>
+        ) : (
+          history.map((h, i) => (
+            <div key={h.id} style={{ padding: "12px 20px", borderBottom: i === history.length - 1 ? "none" : `1px solid ${C.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", marginBottom: "4px" }}>
+                <span style={{ color: C.textMuted, textDecoration: "line-through" }}>
+                  {h.previous_due_date ? new Date(h.previous_due_date).toLocaleString() : "No deadline"}
+                </span>
+                <i className="ti ti-arrow-right" style={{ fontSize: "12px", color: C.textMuted }} />
+                <span style={{ fontWeight: "600", color: C.textPrimary }}>{new Date(h.new_due_date).toLocaleString()}</span>
+              </div>
+              <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
+                By {h.updated_by} · {new Date(h.updated_at).toLocaleString()}
+              </p>
+              {h.reason && <p style={{ fontSize: "12px", color: C.textSecondary, margin: "4px 0 0" }}>"{h.reason}"</p>}
+            </div>
+          ))
+        )}
+      </div>
+    </ModalOverlay>
+  );
+}
+
+function ModalOverlay({ children, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}
+    >
+      <div onClick={(e) => e.stopPropagation()} className="animate-slide-up" style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, width: "100%", maxWidth: "440px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,0.2)" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function toLocalInputValue(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

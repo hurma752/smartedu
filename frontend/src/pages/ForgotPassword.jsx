@@ -1,11 +1,13 @@
 // src/pages/ForgotPassword.jsx
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useTheme } from "../context/ThemeContext";
 import * as passwordApi from "../api/password";
 import backgroundImage from "../assets/alpha-bg.jpg";
 import { C, T } from "../theme";
 
 export default function ForgotPassword() {
+  const { isDark, toggleTheme } = useTheme();
   const [email, setEmail]     = useState("");
   const [sent, setSent]       = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,20 +21,46 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "'Inter', system-ui, sans-serif", backgroundImage: `url(${backgroundImage})`, backgroundSize: "cover", backgroundPosition: "center", backgroundColor: "#F8F9FA", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", position: "relative" }}>
-      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.18)", pointerEvents: "none" }} />
+    <div style={{ minHeight: "100vh", fontFamily: "'Inter', system-ui, sans-serif", backgroundImage: `url(${backgroundImage})`, backgroundSize: "cover", backgroundPosition: "center", backgroundColor: C.pageBg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", position: "relative" }}>
+      
+      {/* Overlay */}
+      <div style={{ position: "fixed", inset: 0, background: isDark ? "rgba(0,0,0,0.65)" : "rgba(0,0,0,0.18)", pointerEvents: "none", transition: "background 0.2s ease" }} />
 
-      <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: "12px", width: "100%", maxWidth: "420px", position: "relative", zIndex: 1, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+      {/* Top-Right Theme Switcher Button */}
+      <div style={{ position: "absolute", top: "20px", right: "20px", zIndex: 10 }}>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          className="btn-interactive"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "8px 14px",
+            borderRadius: "20px",
+            background: C.cardBg,
+            border: `1px solid ${C.border}`,
+            color: C.textPrimary,
+            fontSize: "13px",
+            fontWeight: "600",
+            cursor: "pointer",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+          }}
+        >
+          <i className={`ti ${isDark ? "ti-sun" : "ti-moon"}`} style={{ fontSize: "17px", color: isDark ? "#F59E0B" : "#6366F1" }} />
+          <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+        </button>
+      </div>
+
+      <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "12px", width: "100%", maxWidth: "420px", position: "relative", zIndex: 1, boxShadow: "0 8px 40px rgba(0,0,0,0.25)", overflow: "hidden" }}>
         <div style={{ height: "4px", background: C.accent }} />
         <div style={{ padding: "36px 36px 32px" }}>
 
           {/* Logo */}
           <div style={{ textAlign: "center", marginBottom: "28px" }}>
-            <div style={{ display: "inline-flex", background: "#111111", borderRadius: "8px", padding: "11px 14px", alignItems: "center", marginBottom: "10px" }}>
-              <span style={{ background: C.accent, color: "#fff", fontWeight: "800", fontSize: "18px", padding: "5px 10px", borderRadius: "5px", lineHeight: 1, letterSpacing: "0.01em" }}>alpha</span>
-              <span style={{ color: "#fff", fontWeight: "700", fontSize: "10px", lineHeight: "1.3", letterSpacing: "0.06em", textTransform: "uppercase", paddingLeft: "10px" }}>
-                ALPHA<br />EDUCATION<br />NETWORK
-              </span>
+            <div style={{ display: "inline-block", marginBottom: "12px" }}>
+              <img src="/alpha-welcome-logo.png" alt="Alpha Education Network" style={{ height: "48px", width: "auto", display: "inline-block", borderRadius: "3px" }} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
               <div style={{ height: "1px", width: "28px", background: C.border }} />
@@ -69,12 +97,12 @@ export default function ForgotPassword() {
                   <input type="email" required autoComplete="email" placeholder="Email address" value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-                    style={{ width: "100%", background: focused ? "#fff" : C.inputBg, border: `1.5px solid ${focused ? C.focusBorder : "transparent"}`, boxShadow: focused ? "0 0 0 3px rgba(17,17,17,0.08)" : "none", borderRadius: "8px", padding: "12px 13px 12px 42px", fontSize: "15px", color: C.textPrimary, fontFamily: "inherit", outline: "none" }}
+                    style={{ width: "100%", background: focused ? C.inputFocus : C.inputBg, border: `1.5px solid ${focused ? C.focusBorder : C.border}`, borderRadius: "8px", padding: "12px 13px 12px 42px", fontSize: "15px", color: C.textPrimary, fontFamily: "inherit", outline: "none" }}
                   />
                 </div>
 
                 <button type="submit" disabled={loading} className="btn-interactive"
-                  style={{ width: "100%", background: loading ? "#555" : C.primary, color: "#fff", border: "none", borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600", fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "9px", marginBottom: "16px" }}>
+                  style={{ width: "100%", background: loading ? C.subtleBg : C.primary, color: C.primaryText, border: "none", borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600", fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "9px", marginBottom: "16px" }}>
                   {loading
                     ? <><i className="ti ti-loader-2" style={{ fontSize: "17px", animation: "spin 1s linear infinite" }} />Sending…</>
                     : <><i className="ti ti-send" style={{ fontSize: "16px" }} />Send reset link</>
@@ -91,7 +119,7 @@ export default function ForgotPassword() {
           )}
         </div>
 
-        <div style={{ background: "#F9FAFB", borderTop: `1px solid ${C.border}`, padding: "12px 36px", textAlign: "center" }}>
+        <div style={{ background: C.subtleBg, borderTop: `1px solid ${C.border}`, padding: "12px 36px", textAlign: "center" }}>
           <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
             Copyright 2024–25 &nbsp;·&nbsp; Alpha Education Network &nbsp;·&nbsp; All rights reserved
           </p>

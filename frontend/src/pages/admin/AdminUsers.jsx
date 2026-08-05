@@ -73,7 +73,7 @@ export default function AdminUsers() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                 {["student", "teacher"].map((r) => (
                   <button key={r} type="button" onClick={() => setForm({ ...form, role: r, registration_number: "" })}
-                    style={{ padding: "10px", borderRadius: "7px", border: `1.5px solid ${form.role === r ? C.primary : C.border}`, background: form.role === r ? C.primary : C.cardBg, color: form.role === r ? "#fff" : C.textSecondary, fontSize: "14px", fontWeight: form.role === r ? "600" : "400", cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>
+                    style={{ padding: "10px", borderRadius: "7px", border: `1.5px solid ${form.role === r ? C.primary : C.border}`, background: form.role === r ? C.primary : C.cardBg, color: form.role === r ? C.primaryText : C.textSecondary, fontSize: "14px", fontWeight: form.role === r ? "600" : "400", cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>
                     {r}
                   </button>
                 ))}
@@ -101,7 +101,7 @@ export default function AdminUsers() {
         <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
           {["all", "student", "teacher"].map((f) => (
             <button key={f} onClick={() => setFilter(f)}
-              style={{ padding: "6px 14px", borderRadius: "6px", border: `1px solid ${filter === f ? C.primary : C.border}`, fontSize: "13px", fontWeight: filter === f ? "600" : "400", cursor: "pointer", fontFamily: "inherit", background: filter === f ? C.primary : C.cardBg, color: filter === f ? "#fff" : C.textSecondary, textTransform: "capitalize" }}>
+              style={{ padding: "6px 14px", borderRadius: "6px", border: `1px solid ${filter === f ? C.primary : C.border}`, fontSize: "13px", fontWeight: filter === f ? "600" : "400", cursor: "pointer", fontFamily: "inherit", background: filter === f ? C.primary : C.cardBg, color: filter === f ? C.primaryText : C.textSecondary, textTransform: "capitalize" }}>
               {f === "all" ? "All users" : `${f}s`}
             </button>
           ))}

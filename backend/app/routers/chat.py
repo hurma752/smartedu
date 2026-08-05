@@ -20,11 +20,102 @@ class ChatRequest(BaseModel):
     course_id: int
 
 
+class EditMessageRequest(BaseModel):
+    message: str
+
+
 class ChatResponse(BaseModel):
     answer: str
     sources: List[str]
     intent: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
+
+
+@router.get("/history/{course_id}")
+def get_chat_history(
+    course_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieves full persistent chat history for the student & course."""
+    get_course_for_access(course_id, current_user, db)
+
+    records = db.query(ChatHistory).filter(
+        ChatHistory.student_id == current_user.id,
+        ChatHistory.course_id == course_id
+    ).order_by(ChatHistory.created_at.asc()).all()
+
+    return [
+        {
+            "id": r.id,
+            "role": r.role,
+            "message": r.message,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in records
+    ]
+
+
+@router.delete("/history/{course_id}")
+def clear_chat_history(
+    course_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Clears all conversation history for the student & course (Start New Conversation)."""
+    get_course_for_access(course_id, current_user, db)
+
+    db.query(ChatHistory).filter(
+        ChatHistory.student_id == current_user.id,
+        ChatHistory.course_id == course_id
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    return {"message": "Chat history cleared successfully."}
+
+
+@router.delete("/message/{message_id}")
+def delete_chat_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Deletes a single chat message owned by the student."""
+    msg = db.query(ChatHistory).filter(
+        ChatHistory.id == message_id,
+        ChatHistory.student_id == current_user.id
+    ).first()
+
+    if not msg:
+        raise HTTPException(404, "Message not found or access denied.")
+
+    db.delete(msg)
+    db.commit()
+    return {"message": "Message deleted."}
+
+
+@router.put("/message/{message_id}")
+def edit_chat_message(
+    message_id: int,
+    payload: EditMessageRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Edits a single chat message text owned by the student."""
+    if not payload.message.strip():
+        raise HTTPException(400, "Message cannot be empty")
+
+    msg = db.query(ChatHistory).filter(
+        ChatHistory.id == message_id,
+        ChatHistory.student_id == current_user.id
+    ).first()
+
+    if not msg:
+        raise HTTPException(404, "Message not found or access denied.")
+
+    msg.message = payload.message.strip()
+    db.commit()
+    return {"id": msg.id, "message": msg.message, "role": msg.role}
 
 
 @router.post("/", response_model=ChatResponse)
@@ -41,7 +132,7 @@ def chat(
     recent_history_objs = db.query(ChatHistory).filter(
         ChatHistory.student_id == current_user.id,
         ChatHistory.course_id == request.course_id
-    ).order_by(ChatHistory.created_at.desc()).limit(6).all()
+    ).order_by(ChatHistory.created_at.desc()).limit(12).all()
 
     recent_history = [
         {"role": h.role, "message": h.message} for h in reversed(recent_history_objs)
@@ -92,7 +183,7 @@ def chat_stream(
     recent_history_objs = db.query(ChatHistory).filter(
         ChatHistory.student_id == student_id,
         ChatHistory.course_id == course_id
-    ).order_by(ChatHistory.created_at.desc()).limit(6).all()
+    ).order_by(ChatHistory.created_at.desc()).limit(12).all()
 
     recent_history = [
         {"role": h.role, "message": h.message} for h in reversed(recent_history_objs)

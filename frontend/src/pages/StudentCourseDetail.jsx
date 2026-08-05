@@ -1,5 +1,5 @@
 // src/pages/StudentCourseDetail.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import Layout, { PageShell, Card, CardHeader } from "../components/Layout";
 import StudentAssignmentsPanel from "../components/student/AssignmentsPanel";
@@ -19,41 +19,60 @@ export default function StudentCourseDetail() {
   const [documents, setDocuments] = useState([]);
 
   // Chat state
-  const [messages,  setMessages]  = useState([
-    { role: "assistant", content: "Ask me anything about this course's material." },
-  ]);
+  const [messages,  setMessages]  = useState([]);
   const [input,    setInput]    = useState("");
   const [chatting, setChatting] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText]   = useState("");
 
-  // AbortController ref — a new one is created each time a message is sent,
-  // and its .abort() is called when the user clicks Stop.
   const abortRef = useRef(null);
   const endRef   = useRef(null);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const { data } = await chatApi.getChatHistory(courseId);
+      if (data && data.length > 0) {
+        setMessages(data.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.message,
+          createdAt: m.created_at,
+        })));
+      } else {
+        setMessages([
+          { role: "assistant", content: "Ask me anything about this course's material, lectures, assignments, or grades." },
+        ]);
+      }
+    } catch {
+      setMessages([
+        { role: "assistant", content: "Ask me anything about this course's material, lectures, assignments, or grades." },
+      ]);
+    }
+  }, [courseId]);
 
   useEffect(() => {
     coursesApi.getCourse(courseId).then(({ data }) => setCourse(data));
     documentsApi.listDocuments(courseId).then(({ data }) =>
       setDocuments(data.filter((d) => d.status === "indexed"))
     );
-  }, [courseId]);
+    loadHistory();
+  }, [courseId, loadHistory]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, chatting]);
 
-  // Clean up any in-flight request when the component unmounts
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
-  const handleSend = async () => {
-    if (!input.trim() || chatting) return;
-    const question = input.trim();
-    setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: question }]);
-    setChatting(true);
-    // Start a fresh empty assistant bubble
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+  const handleSend = async (textOverride) => {
+    const question = (textOverride || input).trim();
+    if (!question || chatting) return;
+    if (!textOverride) setInput("");
 
-    // Create a new AbortController for this request
+    setMessages((prev) => [...prev, { role: "user", content: question, createdAt: new Date().toISOString() }]);
+    setChatting(true);
+    setMessages((prev) => [...prev, { role: "assistant", content: "", createdAt: new Date().toISOString() }]);
+
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -61,19 +80,21 @@ export default function StudentCourseDetail() {
       await chatApi.sendMessageStream(courseId, question, (partialText) => {
         setMessages((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1] = { role: "assistant", content: partialText };
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            role: "assistant",
+            content: partialText,
+          };
           return updated;
         });
       }, controller.signal);
-
+      // Reload persistent history IDs
+      loadHistory();
     } catch (err) {
-      // AbortError means the user clicked Stop — mark the bubble as stopped,
-      // not as an error. Any text already streamed is preserved.
       if (err.name === "AbortError") {
         setMessages((prev) => {
           const updated = [...prev];
           const last    = updated[updated.length - 1];
-          // Only annotate if the bubble is still empty (nothing was received yet)
           if (last.role === "assistant" && last.content === "") {
             updated[updated.length - 1] = {
               ...last,
@@ -81,7 +102,6 @@ export default function StudentCourseDetail() {
               isStopped: true,
             };
           } else {
-            // Partial text is already in state — just mark it stopped
             updated[updated.length - 1] = { ...last, isStopped: true };
           }
           return updated;
@@ -107,7 +127,44 @@ export default function StudentCourseDetail() {
 
   const handleStop = () => {
     abortRef.current?.abort();
-    // setChatting(false) will be called by the finally block above
+  };
+
+  const handleClearHistory = async () => {
+    if (!confirm("Start a new conversation? This will clear history for this course.")) return;
+    try {
+      await chatApi.clearChatHistory(courseId);
+      setMessages([
+        { role: "assistant", content: "Ask me anything about this course's material, lectures, assignments, or grades." },
+      ]);
+    } catch {
+      alert("Couldn't clear chat history.");
+    }
+  };
+
+  const handleDeleteMessage = async (msgId, index) => {
+    if (msgId) {
+      try {
+        await chatApi.deleteChatMessage(msgId);
+      } catch { /* ignore */ }
+    }
+    setMessages((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleStartEdit = (msg) => {
+    setEditingId(msg.id || msg.content);
+    setEditText(msg.content);
+  };
+
+  const handleSaveEdit = async (msgObj, index) => {
+    if (!editText.trim()) return;
+    const newText = editText.trim();
+    setEditingId(null);
+    if (msgObj.id) {
+      try {
+        await chatApi.editChatMessage(msgObj.id, newText);
+      } catch { /* ignore */ }
+    }
+    handleSend(newText);
   };
 
   if (!course) return (
@@ -165,12 +222,39 @@ export default function StudentCourseDetail() {
 
         {/* ── AI Chatbot ── */}
         {activeTab === "chatbot" && (
-          <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: "420px" }}>
+          <div style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: "460px", overflow: "hidden" }}>
+
+            {/* Chatbot Header with New Conversation Button */}
+            <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.subtleBg }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <i className="ti ti-sparkles" style={{ fontSize: "18px", color: C.accent }} />
+                <span style={{ fontSize: "14px", fontWeight: "700", color: C.textPrimary }}>SmartEdu AI Assistant</span>
+              </div>
+              <button
+                onClick={handleClearHistory}
+                className="btn-interactive"
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 12px", borderRadius: "6px", background: C.cardBg, border: `1px solid ${C.border}`, color: C.textSecondary, fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                <i className="ti ti-plus" style={{ fontSize: "14px" }} />
+                New Chat
+              </button>
+            </div>
 
             {/* Messages */}
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 20px 0" }}>
               {messages.map((msg, i) => (
-                <MessageBubble key={i} msg={msg} />
+                <MessageBubble
+                  key={msg.id || i}
+                  msg={msg}
+                  index={i}
+                  isEditing={editingId === (msg.id || msg.content)}
+                  editText={editText}
+                  setEditText={setEditText}
+                  onStartEdit={() => handleStartEdit(msg)}
+                  onSaveEdit={() => handleSaveEdit(msg, i)}
+                  onCancelEdit={() => setEditingId(null)}
+                  onDelete={() => handleDeleteMessage(msg.id, i)}
+                />
               ))}
 
               {/* Typing indicator — shown only while streaming AND no content yet */}
@@ -198,7 +282,7 @@ export default function StudentCourseDetail() {
                 ].map((chip) => (
                   <button
                     key={chip}
-                    onClick={() => { setInput(chip); }}
+                    onClick={() => handleSend(chip)}
                     className="btn-interactive"
                     style={{
                       background: C.subtleBg, border: `1px solid ${C.border}`,
@@ -218,28 +302,25 @@ export default function StudentCourseDetail() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !chatting && handleSend()}
-                placeholder="Ask about this course…"
+                placeholder="Ask about this course, lectures, or assignments…"
                 disabled={chatting}
                 style={{ flex: 1, background: C.inputBg, border: "1.5px solid transparent", borderRadius: "7px", padding: "10px 13px", fontSize: "14px", color: C.textPrimary, fontFamily: "inherit", outline: "none", opacity: chatting ? 0.6 : 1 }}
-                onFocus={(e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = "#fff"; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; }}
+                onFocus={(e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; }}
                 onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = C.inputBg; e.target.style.boxShadow = "none"; }}
               />
 
-              {/* Stop button — visible only while generating */}
               {chatting ? (
                 <button
                   onClick={handleStop}
                   style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 16px", borderRadius: "7px", border: `1.5px solid ${C.dangerBorder}`, background: C.dangerBg, color: C.dangerText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", flexShrink: 0, transition: "background 0.12s" }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = "#FEE2E2"}
-                  onMouseLeave={(e) => e.currentTarget.style.background = C.dangerBg}
                 >
                   <i className="ti ti-player-stop-filled" style={{ fontSize: "14px" }} />Stop
                 </button>
               ) : (
                 <button
-                  onClick={handleSend}
+                  onClick={() => handleSend()}
                   disabled={!input.trim()}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 18px", borderRadius: "7px", background: C.primary, color: "#fff", border: "none", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: !input.trim() ? "not-allowed" : "pointer", opacity: !input.trim() ? 0.4 : 1, flexShrink: 0 }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 18px", borderRadius: "7px", background: C.primary, color: C.primaryText, border: "none", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: !input.trim() ? "not-allowed" : "pointer", opacity: !input.trim() ? 0.4 : 1, flexShrink: 0 }}
                 >
                   <i className="ti ti-send" style={{ fontSize: "15px" }} />Send
                 </button>
@@ -258,44 +339,102 @@ export default function StudentCourseDetail() {
 function AssistantAvatar() {
   return (
     <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginRight: "8px", alignSelf: "flex-end" }}>
-      <i className="ti ti-sparkles" style={{ fontSize: "13px", color: "#fff" }} />
+      <i className="ti ti-sparkles" style={{ fontSize: "13px", color: C.primaryText }} />
     </div>
   );
 }
 
-function MessageBubble({ msg }) {
+function MessageBubble({ msg, index, isEditing, editText, setEditText, onStartEdit, onSaveEdit, onCancelEdit, onDelete }) {
   const isUser = msg.role === "user";
+  const [hovered, setHovered] = useState(false);
 
-  // Choose bubble appearance
   const bubbleBg =
     isUser        ? C.primary  :
     msg.isError   ? C.dangerBg :
     C.subtleBg;
 
   const bubbleColor =
-    isUser        ? "#fff"           :
+    isUser        ? C.primaryText    :
     msg.isError   ? C.dangerText     :
     C.textPrimary;
 
+  const formattedTime = msg.createdAt
+    ? new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
+
   return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: "12px", alignItems: "flex-end", gap: "8px" }}>
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: "14px", alignItems: "flex-end", gap: "8px", position: "relative" }}
+    >
       {!isUser && <AssistantAvatar />}
-      <div style={{ maxWidth: "68%" }}>
-        <div style={{
-          borderRadius: "12px", padding: "11px 14px", fontSize: "14px", lineHeight: "1.6",
-          background: bubbleBg, color: bubbleColor,
-          borderBottomRightRadius: isUser ? "3px" : "12px",
-          borderBottomLeftRadius: !isUser  ? "3px" : "12px",
-        }}>
-          <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{msg.content}</p>
-        </div>
-        {/* Stopped indicator — shown beneath the bubble, not inside it */}
-        {msg.isStopped && (
-          <div style={{ display: "flex", alignItems: "center", gap: "5px", marginTop: "5px", paddingLeft: "4px" }}>
-            <i className="ti ti-player-stop-filled" style={{ fontSize: "11px", color: C.textMuted }} />
-            <span style={{ fontSize: "11px", color: C.textMuted }}>Generation stopped</span>
+      <div style={{ maxWidth: "70%" }}>
+
+        {isEditing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", background: C.cardBg, border: `1.5px solid ${C.focusBorder}`, borderRadius: "10px", padding: "10px" }}>
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              rows={2}
+              style={{ width: "100%", background: C.inputBg, border: "none", outline: "none", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", resize: "vertical" }}
+            />
+            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+              <button onClick={onCancelEdit} style={{ background: C.subtleBg, border: `1px solid ${C.border}`, borderRadius: "5px", padding: "4px 8px", fontSize: "11px", color: C.textSecondary, cursor: "pointer" }}>Cancel</button>
+              <button onClick={onSaveEdit} style={{ background: C.primary, border: "none", borderRadius: "5px", padding: "4px 10px", fontSize: "11px", color: C.primaryText, fontWeight: "600", cursor: "pointer" }}>Save & Resend</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ position: "relative" }}>
+            <div style={{
+              borderRadius: "12px", padding: "11px 15px", fontSize: "14px", lineHeight: "1.6",
+              background: bubbleBg, color: bubbleColor,
+              borderBottomRightRadius: isUser ? "3px" : "12px",
+              borderBottomLeftRadius: !isUser  ? "3px" : "12px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+            }}>
+              <p style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</p>
+            </div>
+
+            {/* Hover Actions: Edit & Delete */}
+            {hovered && (
+              <div style={{
+                position: "absolute",
+                top: "-10px",
+                right: isUser ? "4px" : "auto",
+                left: !isUser ? "4px" : "auto",
+                display: "flex",
+                gap: "4px",
+                background: C.cardBg,
+                border: `1px solid ${C.border}`,
+                borderRadius: "16px",
+                padding: "2px 6px",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+                zIndex: 5
+              }}>
+                {isUser && (
+                  <button onClick={onStartEdit} title="Edit & resend" style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "2px" }}>
+                    <i className="ti ti-pencil" style={{ fontSize: "12px" }} />
+                  </button>
+                )}
+                <button onClick={onDelete} title="Delete message" style={{ background: "none", border: "none", cursor: "pointer", color: C.dangerText, padding: "2px" }}>
+                  <i className="ti ti-trash" style={{ fontSize: "12px" }} />
+                </button>
+              </div>
+            )}
           </div>
         )}
+
+        {/* Timestamp & Status */}
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", justifyContent: isUser ? "flex-end" : "flex-start", paddingLeft: !isUser ? "2px" : 0, paddingRight: isUser ? "2px" : 0 }}>
+          {formattedTime && <span style={{ fontSize: "10px", color: C.textMuted }}>{formattedTime}</span>}
+          {msg.isStopped && (
+            <span style={{ fontSize: "10px", color: C.textMuted, display: "flex", alignItems: "center", gap: "3px" }}>
+              <i className="ti ti-player-stop-filled" style={{ fontSize: "10px" }} />Stopped
+            </span>
+          )}
+        </div>
+
       </div>
     </div>
   );

@@ -4,74 +4,73 @@
 
 export const C = {
   // ── Surfaces ──────────────────────────────────────────────────────
-  pageBg:       "#F8F9FA",
-  cardBg:       "#FFFFFF",
-  subtleBg:     "#F3F4F6",
-  border:       "#E5E7EB",
-  borderStrong: "#D1D5DB",
+  pageBg:       "var(--page-bg)",
+  cardBg:       "var(--card-bg)",
+  subtleBg:     "var(--subtle-bg)",
+  border:       "var(--border)",
+  borderStrong: "var(--border-strong)",
 
   // ── Text ──────────────────────────────────────────────────────────
-  textPrimary:   "#111111",
-  textSecondary: "#4B5563",
-  textMuted:     "#9CA3AF",
+  textPrimary:   "var(--text-primary)",
+  textSecondary: "var(--text-secondary)",
+  textMuted:     "var(--text-muted)",
 
   // ── Brand — Alpha charcoal + red ──────────────────────────────────
-  // Primary: charcoal black — buttons, active nav, headings
-  primary:       "#111111",
-  primaryHover:  "#000000",
+  primary:       "var(--primary)",
+  primaryText:   "var(--primary-text)",
+  primaryHover:  "var(--primary-hover)",
 
-  // Accent: Alpha red — sparingly, same role as red in the logo
-  accent:        "#D62828",
-  accentHover:   "#B91C1C",
-  accentTint:    "#FEF2F2",
-  accentText:    "#991B1B",
+  accent:        "var(--accent)",
+  accentHover:   "var(--accent-hover)",
+  accentTint:    "var(--accent-tint)",
+  accentText:    "var(--accent-text)",
 
-  // ── Sidebar — dark field echoing the logo background ──────────────
-  sidebarBg:        "#0D0D0D",
-  sidebarBorder:    "rgba(255,255,255,0.07)",
-  sidebarText:      "rgba(255,255,255,0.45)",
+  // ── Sidebar — dark field ──────────────────────────────────────────
+  sidebarBg:        "var(--sidebar-bg)",
+  sidebarBorder:    "var(--sidebar-border)",
+  sidebarText:      "var(--sidebar-text)",
   sidebarTextHover: "rgba(255,255,255,0.75)",
-  sidebarActive:    "#FFFFFF",
-  sidebarActiveBg:  "rgba(255,255,255,0.09)",
-  sidebarMuted:     "rgba(255,255,255,0.25)",
+  sidebarActive:    "var(--sidebar-active)",
+  sidebarActiveBg:  "var(--sidebar-active-bg)",
+  sidebarMuted:     "var(--sidebar-muted)",
 
   // ── Inputs ────────────────────────────────────────────────────────
-  inputBg:      "#F3F4F6",
-  inputFocus:   "#FFFFFF",
-  focusBorder:  "#111111",
+  inputBg:      "var(--input-bg)",
+  inputFocus:   "var(--input-focus)",
+  focusBorder:  "var(--focus-border)",
 
   // ── Semantic ──────────────────────────────────────────────────────
-  successBg:     "#F0FDF4",
-  successText:   "#166534",
-  successBorder: "#BBF7D0",
+  successBg:     "var(--success-bg)",
+  successText:   "var(--success-text)",
+  successBorder: "var(--success-border)",
 
-  warningBg:     "#FFFBEB",
-  warningText:   "#92400E",
-  warningBorder: "#FDE68A",
+  warningBg:     "var(--warning-bg)",
+  warningText:   "var(--warning-text)",
+  warningBorder: "var(--warning-border)",
 
-  dangerBg:      "#FEF2F2",
-  dangerText:    "#991B1B",
-  dangerBorder:  "#FECACA",
+  dangerBg:      "var(--danger-bg)",
+  dangerText:    "var(--danger-text)",
+  dangerBorder:  "var(--danger-border)",
 
-  infoBg:        "#EFF6FF",
-  infoText:      "#1E40AF",
-  infoBorder:    "#BFDBFE",
+  infoBg:        "var(--info-bg)",
+  infoText:      "var(--info-text)",
+  infoBorder:    "var(--info-border)",
 
   // ── Stat card accent bars (left border) ───────────────────────────
-  statCourses:  "#D62828",  // red
-  statTeachers: "#198754",  // green
-  statStudents: "#2563EB",  // blue
-  statPending:  "#F59E0B",  // amber
+  statCourses:  "var(--stat-courses)",
+  statTeachers: "var(--stat-teachers)",
+  statStudents: "var(--stat-students)",
+  statPending:  "var(--stat-pending)",
 
   // ── Misc ──────────────────────────────────────────────────────────
-  footerText: "#9CA3AF",
+  footerText: "var(--text-muted)",
 };
 
 // Role badge colours
 export const ROLE_COLORS = {
-  admin:   { bg: "#F3F4F6", text: "#111111" },
-  teacher: { bg: "#F0FDF4", text: "#166534" },
-  student: { bg: "#EFF6FF", text: "#1E40AF" },
+  admin:   { bg: "var(--subtle-bg)",  text: "var(--text-primary)" },
+  teacher: { bg: "var(--success-bg)", text: "var(--success-text)" },
+  student: { bg: "var(--info-bg)",    text: "var(--info-text)" },
 };
 
 // ── Typography scale — University ERP, spacious & readable ────────────────

@@ -183,11 +183,10 @@ def answer_question(
     target_doc = None
     target_idx = None
 
-    # 3. LMS Context Query
-    if intent in ("lms", "hybrid"):
-        t0 = time.perf_counter()
-        lms_context = build_lms_context(course_id, student_id, db)
-        metrics.mark_lms(time.perf_counter() - t0)
+    # 3. LMS Context Query — Always build for complete course awareness
+    t0 = time.perf_counter()
+    lms_context = build_lms_context(course_id, student_id, db)
+    metrics.mark_lms(time.perf_counter() - t0)
 
     # 4. Vector Retrieval & Lecture Ordinal Resolution
     if intent in ("document", "hybrid"):
@@ -307,11 +306,10 @@ def answer_question_stream(
     target_doc = None
     target_idx = None
 
-    # LMS
-    if intent in ("lms", "hybrid"):
-        t0 = time.perf_counter()
-        lms_context = build_lms_context(course_id, student_id, db)
-        metrics.mark_lms(time.perf_counter() - t0)
+    # LMS — Always build for complete course awareness
+    t0 = time.perf_counter()
+    lms_context = build_lms_context(course_id, student_id, db)
+    metrics.mark_lms(time.perf_counter() - t0)
 
     # Retrieval & Ordinal Resolution
     if intent in ("document", "hybrid"):

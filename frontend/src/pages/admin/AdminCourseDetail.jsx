@@ -107,7 +107,7 @@ export default function AdminCourseDetail() {
                 <div style={{ marginTop: "18px", display: "flex", flexDirection: "column", gap: "8px" }}>
                   {course.teachers.map((teacher) => (
                     <div key={teacher.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "7px", background: C.successBg, border: `1px solid ${C.successBorder}` }}>
-                      <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: "#fff", border: `1px solid ${C.successBorder}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: C.cardBg, border: `1px solid ${C.successBorder}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                         <span style={{ fontSize: "13px", fontWeight: "700", color: C.successText }}>{teacher.full_name.charAt(0)}</span>
                       </div>
                       <div>

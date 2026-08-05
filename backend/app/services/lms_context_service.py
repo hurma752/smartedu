@@ -95,6 +95,7 @@ def build_lms_context(course_id: int, student_id: int, db: Session) -> str:
 
     lines = []
     lines.append(f"[Course] {course.name} ({course.code}) | Instructor: {teacher_names} | Enrolled: {enrollment_count}")
+    lines.append("[Plagiarism Policy] Evaluated using hybrid TF-IDF similarity, 4-gram shingle overlap, and semantic embeddings. Risk Levels: LOW (<15%), MEDIUM (15-39%), HIGH (>=40%). Findings guide teacher review.")
 
     if badge_titles:
         lines.append(f"[Earned Badges] {', '.join(badge_titles)}")
