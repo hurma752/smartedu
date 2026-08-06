@@ -336,10 +336,14 @@ export default function StudentCourseDetail() {
               {chatting && messages[messages.length - 1]?.content === "" && (
                 <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: "12px" }}>
                   <AssistantAvatar />
-                  <div style={{ background: C.subtleBg, borderRadius: "12px", borderBottomLeftRadius: "3px", padding: "14px 16px", display: "flex", gap: "4px", alignItems: "center" }}>
-                    {[0, 150, 300].map((delay) => (
-                      <span key={delay} style={{ width: "6px", height: "6px", background: C.textMuted, borderRadius: "50%", display: "inline-block", animation: "bounce 1s infinite", animationDelay: `${delay}ms` }} />
-                    ))}
+                  <div style={{ background: C.subtleBg, borderRadius: "12px", borderBottomLeftRadius: "3px", padding: "12px 16px", display: "flex", gap: "8px", alignItems: "center", border: `1px solid ${C.border}` }}>
+                    <i className="ti ti-sparkles" style={{ fontSize: "15px", color: C.accent, animation: "spin 2s linear infinite" }} />
+                    <span style={{ fontSize: "13px", fontWeight: "600", color: C.textSecondary }}>AI is processing course materials…</span>
+                    <div style={{ display: "flex", gap: "4px", marginLeft: "4px" }}>
+                      {[0, 150, 300].map((delay) => (
+                        <span key={delay} style={{ width: "6px", height: "6px", background: C.accent, borderRadius: "50%", display: "inline-block", animation: "bounce 1s infinite", animationDelay: `${delay}ms` }} />
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -351,9 +355,9 @@ export default function StudentCourseDetail() {
               <div style={{ padding: "0 20px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {[
                   "Summarize available lectures",
-                  "List all lecture titles",
                   "What assignments are due?",
-                  "How is plagiarism evaluated?"
+                  "How is plagiarism evaluated?",
+                  "Who is the course instructor?"
                 ].map((chip) => (
                   <button
                     key={chip}

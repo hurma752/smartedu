@@ -25,6 +25,19 @@ export const C = {
   accentTint:    "var(--accent-tint)",
   accentText:    "var(--accent-text)",
 
+  // ── AI Brand Highlights — Crimson & Silver Metallic ───────────────
+  aiGlowRed:     "var(--ai-glow-red)",
+  aiGlowCrimson: "var(--ai-glow-crimson)",
+  aiGlowSilver:  "var(--ai-glow-silver)",
+  aiHeroBg:      "var(--ai-hero-bg)",
+  aiCardBg:      "var(--ai-card-bg)",
+  aiBorder:      "var(--ai-border)",
+
+  // ── Motion & Animation Easing Tokens ──────────────────────────────
+  transitionFast: "0.15s ease",
+  transitionBase: "0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+  transitionSlow: "0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+
   // ── Sidebar — dark field ──────────────────────────────────────────
   sidebarBg:        "var(--sidebar-bg)",
   sidebarBorder:    "var(--sidebar-border)",

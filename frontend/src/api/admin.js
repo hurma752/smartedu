@@ -8,6 +8,8 @@ export const activateUser = (userId) => client.patch(`/admin/users/${userId}/act
 
 export const createCourse = (data) => client.post("/admin/courses", data);
 export const listAllCourses = () => client.get("/admin/courses");
+export const deleteCourse = (courseId) => client.delete(`/admin/courses/${courseId}`);
+export const listCourseStudents = (courseId) => client.get(`/admin/courses/${courseId}/students`);
 
 export const assignTeacher = (courseId, teacherEmail) =>
   client.post(`/admin/courses/${courseId}/assign-teacher`, { teacher_email: teacherEmail });

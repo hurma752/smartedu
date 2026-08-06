@@ -561,7 +561,7 @@ function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
         <span>Similarity findings inform grading decisions but do not mandate a penalty. Evaluate assignment mastery & originality directly.</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "8px", marginBottom: "12px" }}>
         <div style={{ background: C.subtleBg, padding: "8px 10px", borderRadius: "6px" }}>
           <span style={{ fontSize: "11px", color: C.textMuted, display: "block" }}>TF-IDF Similarity</span>
           <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>{((report.tfidf_score || 0) * 100).toFixed(1)}%</span>
@@ -569,6 +569,10 @@ function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
         <div style={{ background: C.subtleBg, padding: "8px 10px", borderRadius: "6px" }}>
           <span style={{ fontSize: "11px", color: C.textMuted, display: "block" }}>Shingle Overlap</span>
           <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>{((report.shingle_score || 0) * 100).toFixed(1)}%</span>
+        </div>
+        <div style={{ background: C.subtleBg, padding: "8px 10px", borderRadius: "6px" }}>
+          <span style={{ fontSize: "11px", color: C.textMuted, display: "block" }}>Semantic Embeddings</span>
+          <span style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary }}>{((report.semantic_score ?? report.embedding_score ?? 0) * 100).toFixed(1)}%</span>
         </div>
       </div>
 

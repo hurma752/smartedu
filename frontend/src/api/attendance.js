@@ -15,3 +15,6 @@ export const getSessionRecords = (sessionId) =>
 
 export const getAttendanceSummary = (courseId) =>
   client.get(`/attendance/${courseId}/summary`);
+
+export const deleteSession = (sessionId) =>
+  client.delete(`/attendance/sessions/${sessionId}`);

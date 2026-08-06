@@ -152,6 +152,81 @@ def list_all_courses(
     return result
 
 
+@router.delete("/courses/{course_id}")
+def delete_course(
+    course_id: int,
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """
+    Permanently deletes a course and cleans up all related records
+    (chat history, enrollments, teacher assignments, sessions, attendance, assignments, submissions, rubrics, documents).
+    """
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(404, "Course not found")
+
+    from app.models.models import (
+        ClassSession, AttendanceRecord, Document, Assignment,
+        Submission, PlagiarismReport, AIEvaluation, FinalGrade,
+        Rubric, RubricCriterion, ChatHistory, StudentAchievement,
+        AssignmentDeadlineHistory
+    )
+    from app.services.lms_context_service import lms_context_cache
+
+    # 1. Delete chat history for this course
+    db.query(ChatHistory).filter(ChatHistory.course_id == course_id).delete(synchronize_session=False)
+
+    # 2. Delete student achievements for this course
+    db.query(StudentAchievement).filter(StudentAchievement.course_id == course_id).delete(synchronize_session=False)
+
+    # 3. Clean teacher assignments & enrollments
+    db.query(TeacherCourseAssignment).filter(TeacherCourseAssignment.course_id == course_id).delete(synchronize_session=False)
+    db.query(Enrollment).filter(Enrollment.course_id == course_id).delete(synchronize_session=False)
+
+    # 4. Clean class sessions and attendance records
+    session_ids = [s.id for s in db.query(ClassSession).filter(ClassSession.course_id == course_id).all()]
+    if session_ids:
+        db.query(AttendanceRecord).filter(AttendanceRecord.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ClassSession).filter(ClassSession.course_id == course_id).delete(synchronize_session=False)
+
+    # 5. Clean assignments and submissions
+    assignments = db.query(Assignment).filter(Assignment.course_id == course_id).all()
+    assignment_ids = [a.id for a in assignments]
+    if assignment_ids:
+        submissions = db.query(Submission).filter(Submission.assignment_id.in_(assignment_ids)).all()
+        submission_ids = [sub.id for sub in submissions]
+        if submission_ids:
+            db.query(PlagiarismReport).filter(
+                (PlagiarismReport.submission_id.in_(submission_ids)) |
+                (PlagiarismReport.matched_submission_id.in_(submission_ids))
+            ).delete(synchronize_session=False)
+            db.query(AIEvaluation).filter(AIEvaluation.submission_id.in_(submission_ids)).delete(synchronize_session=False)
+            db.query(FinalGrade).filter(FinalGrade.submission_id.in_(submission_ids)).delete(synchronize_session=False)
+            db.query(Submission).filter(Submission.id.in_(submission_ids)).delete(synchronize_session=False)
+
+        db.query(AssignmentDeadlineHistory).filter(AssignmentDeadlineHistory.assignment_id.in_(assignment_ids)).delete(synchronize_session=False)
+        db.query(Assignment).filter(Assignment.id.in_(assignment_ids)).delete(synchronize_session=False)
+
+    # 6. Clean rubrics & rubric criteria
+    rubrics = db.query(Rubric).filter(Rubric.course_id == course_id).all()
+    rubric_ids = [r.id for r in rubrics]
+    if rubric_ids:
+        db.query(RubricCriterion).filter(RubricCriterion.rubric_id.in_(rubric_ids)).delete(synchronize_session=False)
+        db.query(Rubric).filter(Rubric.id.in_(rubric_ids)).delete(synchronize_session=False)
+
+    # 7. Clean documents
+    db.query(Document).filter(Document.course_id == course_id).delete(synchronize_session=False)
+
+    # 8. Delete the course itself
+    course_name = course.name
+    db.delete(course)
+    db.commit()
+
+    lms_context_cache.clear()
+    return {"message": f"Course '{course_name}' deleted successfully"}
+
+
 @router.post("/courses/{course_id}/assign-teacher")
 def assign_teacher(
     course_id: int,
@@ -169,12 +244,18 @@ def assign_teacher(
     if not teacher:
         raise HTTPException(404, "No teacher found with that email")
 
-    existing = db.query(TeacherCourseAssignment).filter(
-        TeacherCourseAssignment.course_id == course_id,
-        TeacherCourseAssignment.teacher_id == teacher.id,
+    # Enforce single teacher restriction: a course can only have one assigned teacher
+    existing_assignment = db.query(TeacherCourseAssignment).filter(
+        TeacherCourseAssignment.course_id == course_id
     ).first()
-    if existing:
-        raise HTTPException(400, "This teacher is already assigned to this course")
+    if existing_assignment:
+        if existing_assignment.teacher_id == teacher.id:
+            raise HTTPException(400, "This teacher is already assigned to this course")
+        else:
+            raise HTTPException(
+                400,
+                "This course already has a teacher assigned. A course can only have one teacher. Remove the current teacher first before assigning a new one."
+            )
 
     assignment = TeacherCourseAssignment(
         teacher_id=teacher.id, course_id=course_id, assigned_by=current_user.id,
@@ -200,6 +281,28 @@ def unassign_teacher(
     db.delete(assignment)
     db.commit()
     return {"message": "Teacher unassigned"}
+
+
+@router.get("/courses/{course_id}/students")
+def list_course_students(
+    course_id: int,
+    current_user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Returns the list of enrolled students for a specific course (used by Admin UI)."""
+    enrollments = db.query(Enrollment).filter(Enrollment.course_id == course_id).all()
+    student_ids = [e.student_id for e in enrollments]
+    students = db.query(User).filter(User.id.in_(student_ids)).all() if student_ids else []
+    return [
+        {
+            "id": s.id,
+            "full_name": s.full_name,
+            "email": s.email,
+            "registration_number": s.registration_number,
+            "is_active": s.is_active,
+        }
+        for s in students
+    ]
 
 
 @router.post("/courses/{course_id}/enroll")

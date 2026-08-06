@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import backgroundImage from "../assets/alpha-bg.jpg";
-import { C, T } from "../theme";
+import { C } from "../theme";
 
 export default function Login() {
   const { loginUser } = useAuth();
@@ -69,7 +69,7 @@ export default function Login() {
 
         <div style={{ padding: "36px 36px 32px" }}>
 
-          {/* ── Alpha Logo — pure red & black box logo without white background ── */}
+          {/* ── Alpha Logo ── */}
           <div style={{ textAlign: "center", marginBottom: "28px" }}>
             <div style={{ display: "inline-block", marginBottom: "12px" }}>
               <img src="/alpha-welcome-logo.png" alt="Alpha Education Network" style={{ height: "48px", width: "auto", display: "inline-block", borderRadius: "3px" }} />
@@ -111,9 +111,18 @@ export default function Login() {
             </div>
 
             <button type="submit" disabled={loading} className="btn-interactive"
-              style={{ width: "100%", background: loading ? C.subtleBg : C.primary, color: C.primaryText, border: "none", borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600", fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "9px", letterSpacing: "0.01em" }}>
+              style={{
+                width: "100%",
+                background: loading ? (isDark ? "#334155" : "#E2E8F0") : C.primary,
+                color: loading ? (isDark ? "#E2E8F0" : "#0F172A") : C.primaryText,
+                border: loading ? `1px solid ${C.border}` : "none",
+                borderRadius: "8px", padding: "13px", fontSize: "15px", fontWeight: "600",
+                fontFamily: "inherit", cursor: loading ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: "9px",
+                letterSpacing: "0.01em"
+              }}>
               {loading
-                ? <><i className="ti ti-loader-2" style={{ fontSize: "17px", animation: "spin 1s linear infinite" }} />Signing in…</>
+                ? <><i className="ti ti-loader-2" style={{ fontSize: "17px", color: isDark ? "#E2E8F0" : "#0F172A", animation: "spin 1s linear infinite" }} /><span style={{ color: isDark ? "#E2E8F0" : "#0F172A" }}>Signing in…</span></>
                 : <><i className="ti ti-lock" style={{ fontSize: "16px" }} />Sign in</>
               }
             </button>
@@ -121,9 +130,9 @@ export default function Login() {
         </div>
 
         {/* Footer */}
-        <div style={{ background: C.subtleBg, borderTop: `1px solid ${C.border}`, padding: "12px 36px", textAlign: "center" }}>
+        <div style={{ background: C.subtleBg, borderTop: `1px solid ${C.border}`, padding: "14px 36px", textAlign: "center" }}>
           <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
-            Copyright 2024–25 &nbsp;·&nbsp; Alpha Education Network &nbsp;·&nbsp; All rights reserved
+            Copyright 2024–26 &nbsp;·&nbsp; Alpha Education Network &nbsp;·&nbsp; All rights reserved
           </p>
         </div>
       </div>

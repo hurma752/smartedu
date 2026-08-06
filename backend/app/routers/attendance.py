@@ -151,3 +151,21 @@ def get_attendance_summary(
 ):
     get_course_for_access(course_id, current_user, db)
     return attendance_service.get_course_attendance_summary(course_id, db)
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(
+    session_id: int,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    """Deletes a class attendance session and all associated student attendance records."""
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    get_course_for_access(session.course_id, current_user, db)
+
+    db.query(AttendanceRecord).filter(AttendanceRecord.session_id == session_id).delete()
+    db.delete(session)
+    db.commit()
+    return {"message": "Attendance session deleted successfully", "id": session_id}

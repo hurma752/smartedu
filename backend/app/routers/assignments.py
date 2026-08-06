@@ -58,12 +58,16 @@ def create_assignment(
     db.commit()
     db.refresh(rubric)
 
+    import re
     for c in payload.criteria:
-        key = c.label.lower().replace(" ", "_").replace("/", "_")
+        clean_label = re.sub(r'[\t\r\n]+', ' ', c.label or "").strip()[:250]
+        key = re.sub(r'[^a-z0-9_]', '', re.sub(r'[\s\t\/\-]+', '_', clean_label.lower())).strip('_')[:250]
+        if not key:
+            key = f"criterion_{rubric.id}"
         db.add(RubricCriterion(
             rubric_id=rubric.id,
             key=key,
-            label=c.label,
+            label=clean_label or "Criterion",
             max_marks=c.max_marks,
             description=c.description,
         ))

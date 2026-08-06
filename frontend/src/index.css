@@ -53,6 +53,13 @@
   --stat-teachers: #198754;
   --stat-students: #2563EB;
   --stat-pending: #F59E0B;
+
+  --ai-glow-red: #EF4444;
+  --ai-glow-crimson: #DC2626;
+  --ai-glow-silver: #64748B;
+  --ai-hero-bg: #F8F9FA;
+  --ai-card-bg: #FFFFFF;
+  --ai-border: rgba(214, 40, 40, 0.2);
 }
 
 [data-theme="dark"] {
@@ -105,6 +112,13 @@
   --stat-teachers: #22C55E;
   --stat-students: #3B82F6;
   --stat-pending: #F59E0B;
+
+  --ai-glow-red: #EF4444;
+  --ai-glow-crimson: #FF2E4C;
+  --ai-glow-silver: #E2E8F0;
+  --ai-hero-bg: #090D16;
+  --ai-card-bg: rgba(30, 41, 59, 0.6);
+  --ai-border: rgba(255, 255, 255, 0.1);
 }
 
 body {

@@ -85,6 +85,18 @@ export default function AttendancePanel({ courseId }) {
     }
   };
 
+  const handleDeleteSession = async (e, sessionId) => {
+    e.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this class session and all its attendance records?")) return;
+    try {
+      await attendanceApi.deleteSession(sessionId);
+      await loadSessions();
+      if (activeSession?.id === sessionId) setActiveSession(null);
+    } catch (err) {
+      setError(getErrorMessage(err, "Couldn't delete session."));
+    }
+  };
+
   if (activeSession) {
     return (
       <Card>
@@ -181,6 +193,27 @@ export default function AttendancePanel({ courseId }) {
               <span style={{ ...T.tiny, fontWeight: "600", padding: "3px 9px", borderRadius: "20px", background: session.marked_count > 0 ? C.successBg : C.subtleBg, color: session.marked_count > 0 ? C.successText : C.textMuted, flexShrink: 0 }}>
                 {session.marked_count}/{roster.length} marked
               </span>
+              <button
+                type="button"
+                title="Delete session"
+                onClick={(e) => handleDeleteSession(e, session.id)}
+                className="btn-interactive"
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${C.dangerBorder}`,
+                  borderRadius: "6px",
+                  color: C.dangerText,
+                  padding: "4px 8px",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0
+                }}
+              >
+                <i className="ti ti-trash" />
+              </button>
             </div>
           ))
         )}

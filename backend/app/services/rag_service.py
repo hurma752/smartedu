@@ -10,6 +10,8 @@ import os
 import re
 import time
 import json
+import logging
+import numpy as np
 import ollama
 from sqlalchemy.orm import Session
 
@@ -26,40 +28,138 @@ from app.services.ocr_service import extract_text_from_pdf, chunk_text
 
 from typing import Optional, Dict, Any, List
 
-SYSTEM_PROMPT = """You are SmartEdu, an intelligent AI academic assistant for this LMS course.
+logger = logging.getLogger("smartedu.chatbot")
 
-STRICT FOCUS DIRECTIVES:
-1. Answer ONLY what the student explicitly asked. Stay 100% focused on their specific question.
-2. If the user asks about grades, performance, or why they are at risk, explain their overall score, academic risk status (e.g. High Risk), assignment scores, teacher feedback, AND the 8 multi-factor risk model dimensions (assignment grade average < 50%, missing rate, lateness, attendance, AI chatbot engagement, material downloads, grade trend, and OCR extraction rate). Do NOT include lecture summaries or PDF material excerpts.
-3. If the user asks about assignment due dates or deadlines, report ONLY assignment title, due date, and submission status. Do NOT include lecture summaries or PDF material excerpts.
-4. If the user asks about lectures, summarize ONLY lecture topics and slide files. Do NOT include assignments, grades, or plagiarism details.
-5. Format your response cleanly using markdown section headings, bold key concepts, and bullet points. Always complete your thoughts fully."""
+BASE_SYSTEM_PROMPT = """You are SmartEdu, an intelligent AI academic assistant for this LMS course.
 
-def filter_context_for_query(question: str, full_lms_context: str) -> str:
-    """Filters LMS context to only include sections relevant to the user's specific query topic."""
+Answer naturally and conversationally, like a knowledgeable teaching assistant talking to a student — not a form or report. Stay focused on what they actually asked. Use markdown structure (headings, bold, bullets) only when it genuinely helps organize a multi-part or list-heavy answer; short, direct questions deserve short, direct, conversational answers. Always complete your thoughts fully."""
+
+TOPIC_DIRECTIVES = {
+    "grades": "The student is asking about grades, performance, or academic risk. Using the data below, explain what's relevant to their question — their score, risk status, feedback, or specific risk factors. You don't need to list all 8 risk model dimensions unless they specifically ask how the risk model works. Don't bring up lecture content or plagiarism unless they asked about it too.",
+    "assignments": "The student is asking about assignments or deadlines. Using the data below, answer with the relevant assignment title(s), due dates, and status. Don't bring up lecture content, grades, or plagiarism unless they asked about it too.",
+    "lectures": "The student is asking about lectures or course materials. Using the data below, answer with the relevant lecture/material information. Don't bring up assignments, grades, or plagiarism unless they asked about it too.",
+    "plagiarism": "The student is asking about the plagiarism/academic-integrity policy. Using the data below, describe the relevant policy. Don't bring up grades or assignments unless they asked about it too.",
+}
+
+# A handful of example phrasings per topic. Not a training set — just anchor points
+# for semantic (embedding-based) similarity matching, so paraphrases route the same
+# way as their keyword-matching equivalents without hardcoding every possible wording.
+TOPIC_EXEMPLARS = {
+    "grades": [
+        "what is my grade in this course",
+        "how am i performing academically",
+        "am i at risk of failing",
+        "what is my current score",
+        "show me my academic risk status",
+        "why am i marked as high risk",
+    ],
+    "assignments": [
+        "what assignments are due",
+        "when is my next deadline",
+        "have i submitted all my homework",
+        "list the pending assignments",
+        "what tasks are overdue",
+    ],
+    "lectures": [
+        "how many lectures are in this course",
+        "summarize the available lecture materials",
+        "what lecture notes have been uploaded",
+        "how much course content is available",
+        "list the lecture slides",
+        "what has been uploaded so far",
+    ],
+    "plagiarism": [
+        "how does plagiarism detection work",
+        "what is the similarity scoring policy",
+        "explain the academic integrity checks",
+    ],
+}
+
+_topic_centroid_cache: Dict[str, np.ndarray] = {}
+SEMANTIC_TOPIC_THRESHOLD = 0.40
+
+
+def _cosine(a, b) -> float:
+    a, b = np.asarray(a), np.asarray(b)
+    denom = np.linalg.norm(a) * np.linalg.norm(b)
+    return float(np.dot(a, b) / denom) if denom else 0.0
+
+
+def _get_topic_centroid(topic: str) -> np.ndarray:
+    """Average embedding of a topic's exemplar phrases, cached after first use."""
+    if topic not in _topic_centroid_cache:
+        vecs = np.array([get_single_embedding(p) for p in TOPIC_EXEMPLARS[topic]])
+        centroid = vecs.mean(axis=0)
+        norm = np.linalg.norm(centroid)
+        _topic_centroid_cache[topic] = centroid / norm if norm else centroid
+    return _topic_centroid_cache[topic]
+
+
+def _detect_topic_keywords(question: str) -> Optional[str]:
+    """Fast, free first pass for unambiguous exact wording."""
     q_lower = question.lower().strip()
-
-    # If specifically asking about grades / scores / performance / risk
     if any(k in q_lower for k in ["grade", "score", "mark", "graded", "feedback", "performance", "risk", "status"]):
+        return "grades"
+    if any(k in q_lower for k in ["assignment", "assignments", "due", "deadline", "overdue", "pending", "homework"]):
+        return "assignments"
+    if any(k in q_lower for k in ["lecture", "lectures", "slides", "material"]):
+        return "lectures"
+    if "plagiarism" in q_lower or "shingle" in q_lower or "similarity" in q_lower:
+        return "plagiarism"
+    return None
+
+
+def detect_topic(question: str, question_embedding: Optional[list] = None) -> Optional[str]:
+    """
+    Topic detection used to scope both LMS context and the system-prompt directive.
+    Keyword match first (cheap, unambiguous); falls back to semantic similarity
+    against topic exemplars so paraphrases ("how much course material is available"
+    vs "how many lectures") route the same way without needing every wording listed.
+    """
+    topic = _detect_topic_keywords(question)
+    if topic:
+        return topic
+
+    if question_embedding is None:
+        question_embedding = get_single_embedding(question)
+
+    best_topic, best_score = None, 0.0
+    for candidate in TOPIC_EXEMPLARS:
+        score = _cosine(question_embedding, _get_topic_centroid(candidate))
+        if score > best_score:
+            best_topic, best_score = candidate, score
+
+    return best_topic if best_score >= SEMANTIC_TOPIC_THRESHOLD else None
+
+
+def build_system_prompt(topic: Optional[str]) -> str:
+    """Composes a topic-scoped system prompt instead of always sending every rule for every question."""
+    if topic and topic in TOPIC_DIRECTIVES:
+        return f"{BASE_SYSTEM_PROMPT}\n\n{TOPIC_DIRECTIVES[topic]}"
+    return f"{BASE_SYSTEM_PROMPT}\n\nAnswer using only the information given below. If the question doesn't map to a specific topic, give a brief, relevant course summary."
+
+
+def filter_context_for_query(topic: Optional[str], full_lms_context: str) -> str:
+    """Filters LMS context to only include sections relevant to the detected topic."""
+    if topic == "grades":
         lines = [line for line in full_lms_context.split("\n") if line.startswith("[Course]") or line.startswith("[Student Performance Analytics]") or (line.strip().startswith("- ") and "Status=" in line)]
         return "\n".join(lines) if lines else full_lms_context
 
-    # If specifically asking about assignments / due dates
-    if any(k in q_lower for k in ["assignment", "assignments", "due", "deadline", "overdue", "pending", "homework"]):
+    if topic == "assignments":
         lines = [line for line in full_lms_context.split("\n") if line.startswith("[Course]") or line.startswith("[Assignments]") or (line.strip().startswith("- ") and not line.strip().startswith("- Lecture"))]
         return "\n".join(lines) if lines else full_lms_context
 
-    # If specifically asking about lectures
-    if any(k in q_lower for k in ["lecture", "lectures", "slides", "material"]):
+    if topic == "lectures":
         lines = [line for line in full_lms_context.split("\n") if line.startswith("[Course]") or line.startswith("[Lectures]") or line.strip().startswith("- Lecture")]
         return "\n".join(lines) if lines else full_lms_context
 
-    # If specifically asking about plagiarism
-    if "plagiarism" in q_lower or "shingle" in q_lower or "similarity" in q_lower:
+    if topic == "plagiarism":
         lines = [line for line in full_lms_context.split("\n") if line.startswith("[Course]") or line.startswith("[Plagiarism Policy]")]
         return "\n".join(lines) if lines else full_lms_context
 
     return full_lms_context
+
+
 
 
 def handle_special_query_guards(question: str) -> Optional[str]:
@@ -84,135 +184,20 @@ def handle_special_query_guards(question: str) -> Optional[str]:
     return None
 
 
-def synthesize_instant_response(question: str, lms_context: str, document_chunks: list, target_doc=None, target_idx=None) -> str:
+def _history_fingerprint(history: Optional[List[Dict[str, str]]]) -> str:
     """
-    Synthesizes a clean, human-readable, highly focused academic response from LMS context
-    and retrieved document chunks. Never includes unrequested sections.
+    Short fingerprint of the immediately preceding turn, used to keep the
+    response cache from serving a follow-up answer ('name them', 'list them')
+    that was actually generated for a *different* prior conversational turn.
     """
-    q_lower = question.lower().strip()
+    if not history:
+        return "no-history"
+    last = history[-1]
+    return normalize_query(last.get("message", ""))[:80]
 
-    lms_data = {
-        "course_info": "",
-        "instructor": "",
-        "enrolled": "",
-        "plagiarism_policy": "",
-        "performance_analytics": "",
-        "badges": [],
-        "lectures": [],
-        "assignments": []
-    }
 
-    for line in lms_context.split("\n"):
-        line_str = line.strip()
-        if line_str.startswith("[Course]"):
-            lms_data["course_info"] = line_str.replace("[Course]", "").strip()
-        elif line_str.startswith("[Student Performance Analytics]"):
-            lms_data["performance_analytics"] = line_str.replace("[Student Performance Analytics]", "").strip()
-        elif line_str.startswith("[Plagiarism Policy]"):
-            lms_data["plagiarism_policy"] = line_str.replace("[Plagiarism Policy]", "").strip()
-        elif line_str.startswith("[Earned Badges]"):
-            lms_data["badges"].append(line_str.replace("[Earned Badges]", "").strip())
-        elif line_str.startswith("- Lecture"):
-            lms_data["lectures"].append(line_str[2:].strip())
-        elif line_str.startswith("- "):
-            lms_data["assignments"].append(line_str[2:].strip())
-
-    # 1. Grade / Score / Risk Analytics Query (Focused Grade + Multi-Factor Risk Breakdown)
-    if any(k in q_lower for k in ["grade", "score", "mark", "graded", "feedback", "performance", "risk", "why am i high risk", "why at risk"]):
-        res = "### 📊 Your Academic Performance & Risk Breakdown\n\n"
-        if lms_data["performance_analytics"]:
-            res += f"• **Overall Performance & Risk**: {lms_data['performance_analytics']}\n\n"
-        
-        res += "**Assignment Scores & Teacher Feedback**:\n"
-        if lms_data["assignments"]:
-            for asgn in lms_data["assignments"]:
-                res += f"• **{asgn}**\n"
-        else:
-            res += "No grades or assignment scores recorded yet.\n"
-
-        res += "\n**SmartEdu Multi-Factor Risk Model Evaluation Basis**:\n"
-        res += "Your academic risk status is calculated by evaluating **8 core learning dimensions**:\n"
-        res += "1. 📝 **Assignment Grade Average**: Passing threshold is 50%. A score below 50% (or 0/5) flags High Risk.\n"
-        res += "2. ⏰ **Missing / Overdue Rate**: Unsubmitted assignments past the deadline.\n"
-        res += "3. ⏳ **Lateness Rate**: Submissions submitted after the due date.\n"
-        res += "4. 📅 **Lecture Attendance Rate**: Class participation in scheduled lectures.\n"
-        res += "5. 💬 **AI Chatbot Engagement Level**: Active learning and question frequency.\n"
-        res += "6. 📥 **Document Download Rate**: Reading & downloading lecture slides.\n"
-        res += "7. 📈 **Grade Trajectory Trend**: Performance direction across sequential tasks.\n"
-        res += "8. 📄 **Document OCR Success Rate**: Proper file upload readability.\n"
-        return res
-
-    # 2. Assignment Due Date / Deadline Query (Focused ONLY on Assignments)
-    if any(k in q_lower for k in ["assignment", "assignments", "due", "deadline", "overdue", "pending", "task", "homework"]):
-        res = "### 📝 Assignment Details & Deadlines\n\n"
-        if lms_data["assignments"]:
-            for asgn in lms_data["assignments"]:
-                res += f"• **{asgn}**\n"
-        else:
-            res += "There are currently no assignments created or due for this course."
-        return res
-
-    # 3. Lecture Summary Query (Focused ONLY on Lectures)
-    if any(k in q_lower for k in ["lecture", "lectures", "slides", "material", "topic"]):
-        if target_doc:
-            clean_name = target_doc.filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
-            res = f"### 📚 Lecture {target_idx}: {clean_name}\n\n"
-            res += f"• **Filename**: `{target_doc.filename}`\n"
-            res += f"• **Position**: Lecture {target_idx} in course syllabus\n"
-            if document_chunks:
-                res += "\n**Key Material Excerpts**:\n"
-                for chunk in document_chunks:
-                    res += f"> {chunk[:280].strip()}...\n\n"
-            return res
-
-        if lms_data["lectures"]:
-            res = "### 📚 Course Lectures & Slide Materials\n\n"
-            for lec in lms_data["lectures"]:
-                res += f"• **{lec}**\n"
-            if document_chunks:
-                res += "\n**Recent Lecture Topics**:\n"
-                for chunk in document_chunks:
-                    res += f"> *{chunk[:220].strip()}...*\n\n"
-            return res
-        else:
-            return "### 📚 Course Lectures\n\nNo lecture files or slide PDFs have been uploaded for this course yet."
-
-    # 4. Plagiarism Policy Query (Focused ONLY on Plagiarism)
-    if "plagiarism" in q_lower or "shingle" in q_lower or "similarity" in q_lower:
-        return (
-            "### 🛡️ SmartEdu Plagiarism Detection System\n\n"
-            "SmartEdu evaluates student submissions using a multi-layer verification engine:\n\n"
-            "1. **K-Shingle 4-Gram Overlap**: Compares 4-word sequences against peer submissions in the course to detect direct copy-pasting.\n"
-            "2. **TF-IDF Cosine Similarity**: Measures overall textual document similarity across the course corpus.\n"
-            "3. **Risk Level Classification**:\n"
-            "   - 🟢 **Low Risk (<15%)**: Normal academic phrasing.\n"
-            "   - 🟡 **Medium Risk (15–39%)**: Partial overlap; flagged for review.\n"
-            "   - 🔴 **High Risk (≥40%)**: Significant similarity; highlighted for instructor action.\n\n"
-            "Passage matches are highlighted directly in the teacher submission portal for verification."
-        )
-
-    # 5. Teacher / Instructor Query
-    if any(k in q_lower for k in ["teacher", "instructor", "professor", "who teaches"]):
-        if lms_data["course_info"]:
-            return f"### 👨‍🏫 Course Instructor & Info\n\n• **Course Details**: {lms_data['course_info']}"
-        return "Instructor information is currently not set for this course."
-
-    # 6. Fallback from Document Chunks
-    if document_chunks:
-        res = "### 📖 Relevant Course Material Excerpts\n\n"
-        for i, chunk in enumerate(document_chunks, 1):
-            res += f"**Excerpt {i}**:\n> {chunk[:280].strip()}...\n\n"
-        return res
-
-    # 7. General Course Summary
-    res = "### 📌 Course Summary\n\n"
-    if lms_data["course_info"]:
-        res += f"• **Course Details**: {lms_data['course_info']}\n"
-    if lms_data["lectures"]:
-        res += f"• **Lectures**: {len(lms_data['lectures'])} uploaded\n"
-    if lms_data["assignments"]:
-        res += f"• **Assignments**: {len(lms_data['assignments'])} created\n"
-    return res
+def _cache_key(course_id: int, student_id: int, session_id: Optional[str], norm_q: str, history):
+    return (course_id, student_id, session_id or "default", _history_fingerprint(history), norm_q)
 
 
 def answer_question(
@@ -221,12 +206,14 @@ def answer_question(
     student_id: int,
     db: Session,
     history: Optional[List[Dict[str, str]]] = None,
+    session_id: Optional[str] = None,
 ) -> dict:
     metrics = PipelineMetrics()
     norm_q = normalize_query(question)
+    cache_key = _cache_key(course_id, student_id, session_id, norm_q, history)
 
     # 1. Response Cache Check (Runs for ALL queries)
-    cached_res = response_cache.get((course_id, student_id, norm_q))
+    cached_res = response_cache.get(cache_key)
     if cached_res is not None:
         metrics.cached = True
         metrics.finish()
@@ -241,28 +228,45 @@ def answer_question(
         metrics.finish()
         metrics.log(question, "guarded")
         result = {"answer": guarded_response, "sources": [], "intent": "guarded", "metrics": metrics.to_dict()}
-        response_cache.set((course_id, student_id, norm_q), result, ttl=300)
+        response_cache.set(cache_key, result, ttl=300)
         return result
 
-    intent = classify_intent(question)
+    t0 = time.perf_counter()
+    intent = classify_intent(question)  # kept for logging/telemetry & API response label only
+    metrics.mark_intent(time.perf_counter() - t0)
+
+    # Single embedding, reused for semantic topic detection AND vector retrieval below —
+    # avoids the previous design's dependency on keyword intent matching to decide
+    # whether course material even gets searched.
+    question_embedding = get_single_embedding(question)
+
+    t0 = time.perf_counter()
+    topic = detect_topic(question, question_embedding)
     full_lms_context = build_lms_context(course_id, student_id, db)
-    lms_context = filter_context_for_query(question, full_lms_context)
+    lms_context = filter_context_for_query(topic, full_lms_context)
+    metrics.mark_lms(time.perf_counter() - t0)
 
     target_doc, target_idx = resolve_lecture_ordinal(question, course_id, db)
     doc_id_filter = target_doc.id if target_doc else None
 
-    # Retrieve vector chunks ONLY for document or hybrid intent queries
-    document_chunks = []
-    if intent in ("document", "hybrid"):
-        question_embedding = get_single_embedding(question)
-        document_chunks = search_similar_chunks(
-            course_id=course_id,
-            query_embedding=question_embedding,
-            n_results=2,
-            document_id=doc_id_filter,
-        )
+    # Always attempt course-material retrieval (search_similar_chunks itself is a
+    # cheap no-op if the course has zero indexed documents). Previously this only
+    # ran when the keyword-based intent classifier happened to guess "document" or
+    # "hybrid" — meaning a differently-worded but perfectly valid question about
+    # course material could silently get zero retrieval. Distance filtering inside
+    # search_similar_chunks already discards irrelevant matches.
+    t0 = time.perf_counter()
+    document_chunks = search_similar_chunks(
+        course_id=course_id,
+        query_embedding=question_embedding,
+        n_results=2,
+        document_id=doc_id_filter,
+    )
+    metrics.mark_retrieval(time.perf_counter() - t0)
 
-    prompt_parts = [SYSTEM_PROMPT, f"\nLMS CONTEXT:\n{lms_context}"]
+    t0 = time.perf_counter()
+    system_prompt = build_system_prompt(topic)
+    prompt_parts = [system_prompt, f"\nLMS CONTEXT:\n{lms_context}"]
     if document_chunks:
         prompt_parts.append("\nCOURSE MATERIAL EXCERPTS:")
         for i, chunk in enumerate(document_chunks, 1):
@@ -274,7 +278,13 @@ def answer_question(
         for item in history:
             r = "assistant" if item.get("role") == "assistant" else "user"
             ollama_messages.append({"role": r, "content": item.get("message", "")})
+    # Reinforcement placed right next to the question — small local models follow
+    # instructions near the end of the prompt far more reliably than ones stated
+    # only once at the top, far from the actual user turn.
+    reminder = TOPIC_DIRECTIVES.get(topic, "Answer only what is asked below, using only the information given.")
+    ollama_messages.append({"role": "system", "content": f"Reminder: {reminder}"})
     ollama_messages.append({"role": "user", "content": question})
+    metrics.mark_prompt(time.perf_counter() - t0)
 
     try:
         response = ollama.chat(
@@ -283,8 +293,11 @@ def answer_question(
             options={"num_predict": 600, "num_ctx": 1536, "temperature": 0.15, "num_thread": os.cpu_count()},
         )
         answer_text = response["message"]["content"]
-    except Exception:
+        answer_source = "llm"
+    except Exception as e:
+        logger.warning(f"Ollama call failed ({type(e).__name__}: {e}) — using fallback template for: {question[:60]!r}")
         answer_text = synthesize_instant_response(question, full_lms_context, document_chunks, target_doc, target_idx)
+        answer_source = "fallback_template"
 
     metrics.finish()
     metrics.log(question, intent)
@@ -293,9 +306,10 @@ def answer_question(
         "answer": answer_text,
         "sources": [c[:150] + "..." for c in document_chunks],
         "intent": intent,
+        "answer_source": answer_source,
         "metrics": metrics.to_dict(),
     }
-    response_cache.set((course_id, student_id, norm_q), result, ttl=300)
+    response_cache.set(cache_key, result, ttl=300)
     return result
 
 
@@ -305,13 +319,15 @@ def answer_question_stream(
     student_id: int,
     db: Session,
     history: Optional[List[Dict[str, str]]] = None,
+    session_id: Optional[str] = None,
 ):
     """Streaming answer pipeline with response caching and topic isolation."""
     metrics = PipelineMetrics()
     norm_q = normalize_query(question)
+    cache_key = _cache_key(course_id, student_id, session_id, norm_q, history)
 
     # 1. Response Cache Check (Runs for ALL queries)
-    cached_res = response_cache.get((course_id, student_id, norm_q))
+    cached_res = response_cache.get(cache_key)
     if cached_res is not None:
         metrics.cached = True
         metrics.finish()
@@ -325,29 +341,46 @@ def answer_question_stream(
         metrics.finish()
         metrics.log(question, "guarded")
         result_obj = {"answer": guarded_response, "sources": [], "intent": "guarded", "metrics": metrics.to_dict()}
-        response_cache.set((course_id, student_id, norm_q), result_obj, ttl=300)
+        response_cache.set(cache_key, result_obj, ttl=300)
         yield guarded_response
         return
 
-    intent = classify_intent(question)
+    t0 = time.perf_counter()
+    intent = classify_intent(question)  # kept for logging/telemetry & API response label only
+    metrics.mark_intent(time.perf_counter() - t0)
+
+    # Single embedding, reused for semantic topic detection AND vector retrieval below —
+    # avoids the previous design's dependency on keyword intent matching to decide
+    # whether course material even gets searched.
+    question_embedding = get_single_embedding(question)
+
+    t0 = time.perf_counter()
+    topic = detect_topic(question, question_embedding)
     full_lms_context = build_lms_context(course_id, student_id, db)
-    lms_context = filter_context_for_query(question, full_lms_context)
+    lms_context = filter_context_for_query(topic, full_lms_context)
+    metrics.mark_lms(time.perf_counter() - t0)
 
     target_doc, target_idx = resolve_lecture_ordinal(question, course_id, db)
     doc_id_filter = target_doc.id if target_doc else None
 
-    # Retrieve vector chunks ONLY for document or hybrid intent queries
-    document_chunks = []
-    if intent in ("document", "hybrid"):
-        question_embedding = get_single_embedding(question)
-        document_chunks = search_similar_chunks(
-            course_id=course_id,
-            query_embedding=question_embedding,
-            n_results=2,
-            document_id=doc_id_filter,
-        )
+    # Always attempt course-material retrieval (search_similar_chunks itself is a
+    # cheap no-op if the course has zero indexed documents). Previously this only
+    # ran when the keyword-based intent classifier happened to guess "document" or
+    # "hybrid" — meaning a differently-worded but perfectly valid question about
+    # course material could silently get zero retrieval. Distance filtering inside
+    # search_similar_chunks already discards irrelevant matches.
+    t0 = time.perf_counter()
+    document_chunks = search_similar_chunks(
+        course_id=course_id,
+        query_embedding=question_embedding,
+        n_results=2,
+        document_id=doc_id_filter,
+    )
+    metrics.mark_retrieval(time.perf_counter() - t0)
 
-    prompt_parts = [SYSTEM_PROMPT, f"\nLMS CONTEXT:\n{lms_context}"]
+    t0 = time.perf_counter()
+    system_prompt = build_system_prompt(topic)
+    prompt_parts = [system_prompt, f"\nLMS CONTEXT:\n{lms_context}"]
     if document_chunks:
         prompt_parts.append("\nCOURSE MATERIAL EXCERPTS:")
         for i, chunk in enumerate(document_chunks, 1):
@@ -359,10 +392,14 @@ def answer_question_stream(
         for item in history:
             r = "assistant" if item.get("role") == "assistant" else "user"
             ollama_messages.append({"role": r, "content": item.get("message", "")})
+    reminder = TOPIC_DIRECTIVES.get(topic, "Answer only what is asked below, using only the information given.")
+    ollama_messages.append({"role": "system", "content": f"Reminder: {reminder}"})
     ollama_messages.append({"role": "user", "content": question})
+    metrics.mark_prompt(time.perf_counter() - t0)
 
     t_llm_start = time.perf_counter()
     full_text = []
+    used_fallback = False
 
     try:
         stream = ollama.chat(
@@ -383,7 +420,9 @@ def answer_question_stream(
                 full_text.append(token)
                 yield token
 
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Ollama stream failed ({type(e).__name__}: {e}) — using fallback template for: {question[:60]!r}")
+        used_fallback = True
         # Fallback if Ollama local daemon is offline
         fallback_msg = synthesize_instant_response(question, full_lms_context, document_chunks, target_doc, target_idx)
         words = fallback_msg.split(" ")
@@ -403,9 +442,10 @@ def answer_question_stream(
         "answer": full_answer,
         "sources": [c[:150] + "..." for c in document_chunks],
         "intent": intent,
+        "answer_source": "fallback_template" if used_fallback else "llm",
         "metrics": metrics.to_dict(),
     }
-    response_cache.set((course_id, student_id, norm_q), result_obj, ttl=300)
+    response_cache.set(cache_key, result_obj, ttl=300)
 
 ORDINAL_MAP = {
     "first": 1, "1st": 1, "one": 1, "1": 1, "01": 1,
@@ -434,10 +474,21 @@ def ingest_document_task(document_id: int, file_path: str, course_id: int, db_se
         if not document:
             return
 
-        raw_text = extract_text_from_pdf(file_path)
+        extraction = extract_text_from_pdf(file_path)
+        raw_text = extraction["text"]
         if not raw_text.strip():
             document.status = "failed"
             document.error_message = "No text could be extracted from this PDF"
+            db.commit()
+            return
+
+        if extraction["low_confidence"]:
+            confidence_str = f"{extraction['confidence']:.0f}%" if extraction["confidence"] is not None else "unknown"
+            document.status = "failed"
+            document.error_message = (
+                f"OCR confidence was too low ({confidence_str}) to reliably index this PDF "
+                "for search. Try uploading a clearer scan, or a native (non-scanned) PDF."
+            )
             db.commit()
             return
 
@@ -536,6 +587,7 @@ def synthesize_instant_response(question: str, lms_context: str, document_chunks
         "instructor": "",
         "enrolled": "",
         "plagiarism_policy": "",
+        "performance_analytics": "",
         "badges": [],
         "lectures": [],
         "assignments": []
@@ -545,6 +597,8 @@ def synthesize_instant_response(question: str, lms_context: str, document_chunks
         line_str = line.strip()
         if line_str.startswith("[Course]"):
             lms_data["course_info"] = line_str.replace("[Course]", "").strip()
+        elif line_str.startswith("[Student Performance Analytics]"):
+            lms_data["performance_analytics"] = line_str.replace("[Student Performance Analytics]", "").strip()
         elif line_str.startswith("[Plagiarism Policy]"):
             lms_data["plagiarism_policy"] = line_str.replace("[Plagiarism Policy]", "").strip()
         elif line_str.startswith("[Earned Badges]"):
@@ -590,8 +644,33 @@ def synthesize_instant_response(question: str, lms_context: str, document_chunks
         else:
             return "### 📚 Course Lectures\n\nNo lecture files or slide PDFs have been uploaded for this course yet.\n\nYour instructor can upload course documents in the **Documents** tab, and I will index and summarize their contents automatically."
 
-    # 3. Assignment / Deadlines / Grades queries
-    if any(k in q_lower for k in ["assignment", "assignments", "due", "deadline", "grade", "score", "overdue", "pending", "task", "homework"]):
+    # 3a. Grade / Score / Risk Analytics query — full multi-factor breakdown
+    if any(k in q_lower for k in ["grade", "score", "mark", "graded", "feedback", "performance", "risk", "why am i high risk", "why at risk"]):
+        res = "### 📊 Your Academic Performance & Risk Breakdown\n\n"
+        if lms_data["performance_analytics"]:
+            res += f"• **Overall Performance & Risk**: {lms_data['performance_analytics']}\n\n"
+
+        res += "**Assignment Scores & Teacher Feedback**:\n"
+        if lms_data["assignments"]:
+            for asgn in lms_data["assignments"]:
+                res += f"• **{asgn}**\n"
+        else:
+            res += "No grades or assignment scores recorded yet.\n"
+
+        res += "\n**SmartEdu Multi-Factor Risk Model Evaluation Basis**:\n"
+        res += "Your academic risk status is calculated by evaluating **8 core learning dimensions**:\n"
+        res += "1. 📝 **Assignment Grade Average**: Passing threshold is 50%. A score below 50% flags High Risk.\n"
+        res += "2. ⏰ **Missing / Overdue Rate**: Unsubmitted assignments past the deadline.\n"
+        res += "3. ⏳ **Lateness Rate**: Submissions submitted after the due date.\n"
+        res += "4. 📅 **Lecture Attendance Rate**: Class participation in scheduled lectures.\n"
+        res += "5. 💬 **AI Chatbot Engagement Level**: Active learning and question frequency.\n"
+        res += "6. 📥 **Document Download Rate**: Reading & downloading lecture slides.\n"
+        res += "7. 📈 **Grade Trajectory Trend**: Performance direction across sequential tasks.\n"
+        res += "8. 📄 **Document OCR Success Rate**: Proper file upload readability.\n"
+        return res
+
+    # 3b. Plain assignment / deadline queries (no grade/score/risk language)
+    if any(k in q_lower for k in ["assignment", "assignments", "due", "deadline", "overdue", "pending", "task", "homework"]):
         if lms_data["assignments"]:
             res = "### 📝 Course Assignments & Deadlines\n\n"
             for asgn in lms_data["assignments"]:
@@ -648,4 +727,3 @@ def synthesize_instant_response(question: str, lms_context: str, document_chunks
         res += f"• **Assignments**: {len(lms_data['assignments'])} created\n"
     res += "\nFeel free to ask specific questions about lecture topics, assignment due dates, or plagiarism policies!"
     return res
-

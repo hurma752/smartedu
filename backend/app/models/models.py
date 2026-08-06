@@ -143,7 +143,7 @@ class RubricCriterion(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     rubric_id = Column(Integer, ForeignKey("rubrics.id", ondelete="CASCADE"), nullable=False)
-    key = Column(String(50), nullable=False)
+    key = Column(String(255), nullable=False)
     label = Column(String(255), nullable=False)
     max_marks = Column(Integer, nullable=False)
     description = Column(Text, nullable=True)

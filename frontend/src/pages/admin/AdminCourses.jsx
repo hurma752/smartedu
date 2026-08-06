@@ -36,6 +36,19 @@ export default function AdminCourses() {
     } catch (err) { setError(getErrorMessage(err, "Could not create course.")); }
   };
 
+  const handleDeleteCourse = async (e, course) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to permanently delete course "${course.name}" (${course.code})?`)) return;
+    setError(""); setSuccess("");
+    try {
+      await adminApi.deleteCourse(course.id);
+      setSuccess(`Course "${course.name}" deleted successfully.`);
+      load();
+    } catch (err) {
+      setError(getErrorMessage(err, "Could not delete course."));
+    }
+  };
+
   const visible = courses.filter((c) => !search || `${c.name} ${c.code}`.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -86,7 +99,13 @@ export default function AdminCourses() {
         ) : (
           <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
             {visible.map((course, i) => (
-              <CourseRow key={course.id} course={course} last={i === visible.length - 1} onClick={() => navigate(`/admin/courses/${course.id}`)} />
+              <CourseRow
+                key={course.id}
+                course={course}
+                last={i === visible.length - 1}
+                onClick={() => navigate(`/admin/courses/${course.id}`)}
+                onDelete={(e) => handleDeleteCourse(e, course)}
+              />
             ))}
           </div>
         )}
@@ -95,7 +114,7 @@ export default function AdminCourses() {
   );
 }
 
-function CourseRow({ course, last, onClick }) {
+function CourseRow({ course, last, onClick, onDelete }) {
   const [hovered, setHovered] = useState(false);
   const noTeacher = !course.teachers?.length;
   return (
@@ -118,8 +137,30 @@ function CourseRow({ course, last, onClick }) {
           </p>
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
         <span style={{ ...T.caption, color: C.textMuted }}>{course.student_count ?? 0} students</span>
+        <button
+          type="button"
+          title="Delete course"
+          onClick={onDelete}
+          className="btn-interactive"
+          style={{
+            background: "transparent",
+            border: `1px solid ${C.dangerBorder}`,
+            borderRadius: "6px",
+            color: C.dangerText,
+            padding: "5px 9px",
+            fontSize: "13px",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            flexShrink: 0
+          }}
+        >
+          <i className="ti ti-trash" style={{ fontSize: "14px" }} />
+          <span>Delete</span>
+        </button>
         <i className="ti ti-arrow-right" style={{ fontSize: "16px", color: hovered ? C.accent : C.textMuted, transition: "color 0.12s" }} />
       </div>
     </div>

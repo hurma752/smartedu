@@ -30,6 +30,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[str]
     intent: Optional[str] = None
+    answer_source: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
 
 
@@ -217,6 +218,7 @@ def chat(
         student_id=current_user.id,
         db=db,
         history=recent_history,
+        session_id=sess_id,
     )
 
     db.add(ChatHistory(
@@ -234,6 +236,7 @@ def chat(
         "answer": result["answer"],
         "sources": result.get("sources", []),
         "intent": result.get("intent"),
+        "answer_source": result.get("answer_source"),
         "metrics": result.get("metrics"),
     }
 
@@ -277,7 +280,10 @@ def chat_stream(
         try:
             stream_db = SessionLocal()
             try:
-                for token in answer_question_stream(message, course_id, student_id, stream_db, history=recent_history):
+                for token in answer_question_stream(
+                    message, course_id, student_id, stream_db,
+                    history=recent_history, session_id=sess_id,
+                ):
                     full_answer += token
                     yield token
             finally:
