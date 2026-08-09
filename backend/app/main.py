@@ -64,6 +64,9 @@ def startup_tasks():
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE plagiarism_reports ADD COLUMN IF NOT EXISTS summary TEXT;"))
             conn.execute(text("ALTER TABLE plagiarism_reports ADD COLUMN IF NOT EXISTS confidence_level VARCHAR(20) DEFAULT 'high';"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_engagement_student_course_created ON engagement_events (student_id, course_id, created_at);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_submissions_student_assignment ON submissions (student_id, assignment_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_attendance_student_session ON attendance_records (student_id, session_id);"))
             conn.commit()
         print("Database schema synced.")
     except Exception as e:

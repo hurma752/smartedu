@@ -38,6 +38,7 @@ const TEACHER_COURSE_TABS = [
 const STUDENT_COURSE_TABS = [
   { tab: "materials",   icon: "ti-file-text",       label: "Lectures"    },
   { tab: "assignments", icon: "ti-clipboard-list",   label: "Assignments" },
+  { tab: "progress",    icon: "ti-chart-line",      label: "My Progress" },
   { tab: "chatbot",     icon: "ti-message-chatbot",  label: "AI Assistant" },
 ];
 

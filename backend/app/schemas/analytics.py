@@ -27,3 +27,36 @@ class CourseRiskSummary(BaseModel):
     model_version: str
     feature_importance: Optional[Dict[str, float]] = None  # None on heuristic fallback
     students: List[StudentRiskResponse]
+
+
+class StudentProgressResponse(BaseModel):
+    student_id: int
+    student_name: str
+    course_id: int
+    granularity: str
+    periods_requested: int
+    generated_at: datetime
+    periods: List[Dict[str, Any]]
+    series: Dict[str, List[Optional[float]]]
+    trends: Dict[str, Any]
+    dimensions: List[Dict[str, Any]]
+    strongest_area: Optional[Dict[str, Any]] = None
+    weakest_area: Optional[Dict[str, Any]] = None
+    summary: Dict[str, Any]
+    risk: Dict[str, Any]
+    insights: List[Dict[str, Any]]
+    meta: Dict[str, Any]
+
+
+class CourseProgressOverviewResponse(BaseModel):
+    course_id: int
+    granularity: str
+    periods_requested: int
+    generated_at: datetime
+    total_students: int
+    average_score: Optional[float] = None
+    risk_breakdown: Dict[str, int]
+    trend_breakdown: Dict[str, int]
+    cohort_trajectory: List[Dict[str, Any]]
+    interventions: List[Dict[str, Any]]
+    students: List[Dict[str, Any]]

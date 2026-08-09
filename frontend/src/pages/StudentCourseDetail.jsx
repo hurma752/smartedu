@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import Layout, { PageShell, Card, CardHeader } from "../components/Layout";
 import StudentAssignmentsPanel from "../components/student/AssignmentsPanel";
+import StudentProgressPanel from "../components/student/StudentProgressPanel";
 import * as coursesApi from "../api/courses";
 import * as documentsApi from "../api/documents";
 import * as chatApi from "../api/chat";
@@ -209,6 +210,7 @@ export default function StudentCourseDetail() {
   const tabLabel = {
     materials:   "Lectures",
     assignments: "Assignments",
+    progress:    "My Progress",
     chatbot:     "AI Assistant",
   }[activeTab] || "Lectures";
 
@@ -249,6 +251,11 @@ export default function StudentCourseDetail() {
         {/* ── Assignments ── */}
         {activeTab === "assignments" && (
           <StudentAssignmentsPanel courseId={courseId} />
+        )}
+
+        {/* ── Progress Analytics ── */}
+        {activeTab === "progress" && (
+          <StudentProgressPanel courseId={courseId} />
         )}
 
         {/* ── AI Chatbot ── */}
