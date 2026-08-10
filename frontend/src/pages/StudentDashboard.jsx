@@ -134,6 +134,7 @@ function StudentCourseCard({ course, navigate }) {
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "14px", marginTop: "14px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
         <button
           onClick={() => navigate(`/student/courses/${course.id}?tab=materials`)}
+          className="btn-interactive"
           style={{
             flex: 1,
             display: "inline-flex",
@@ -149,7 +150,6 @@ function StudentCourseCard({ course, navigate }) {
             color: C.textPrimary,
             cursor: "pointer",
             fontFamily: "inherit",
-            transition: "all 0.12s ease",
           }}
         >
           <i className="ti ti-file-text" style={{ fontSize: "13px", color: C.accent }} />
@@ -158,6 +158,7 @@ function StudentCourseCard({ course, navigate }) {
 
         <button
           onClick={() => navigate(`/student/courses/${course.id}?tab=assignments`)}
+          className="btn-interactive"
           style={{
             flex: 1,
             display: "inline-flex",
@@ -173,7 +174,6 @@ function StudentCourseCard({ course, navigate }) {
             color: C.textPrimary,
             cursor: "pointer",
             fontFamily: "inherit",
-            transition: "all 0.12s ease",
           }}
         >
           <i className="ti ti-clipboard-list" style={{ fontSize: "13px", color: C.accent }} />
@@ -182,7 +182,9 @@ function StudentCourseCard({ course, navigate }) {
 
         <button
           onClick={() => navigate(`/student/courses/${course.id}?tab=chatbot`)}
+          className="btn-interactive"
           style={{
+            flex: 1,
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
@@ -191,15 +193,14 @@ function StudentCourseCard({ course, navigate }) {
             fontWeight: "600",
             padding: "6px 10px",
             borderRadius: "6px",
-            background: C.accentTint,
+            background: C.subtleBg,
             border: `1px solid ${C.border}`,
-            color: C.accentText,
+            color: C.textPrimary,
             cursor: "pointer",
             fontFamily: "inherit",
-            transition: "all 0.12s ease",
           }}
         >
-          <i className="ti ti-message-chatbot" style={{ fontSize: "14px" }} />
+          <i className="ti ti-sparkles" style={{ fontSize: "13px", color: C.accent }} />
           AI Chat
         </button>
       </div>

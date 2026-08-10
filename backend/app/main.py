@@ -1,4 +1,5 @@
 # app/main.py
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import ollama
@@ -6,6 +7,12 @@ from app.config import settings
 from app.database.db import SessionLocal
 from app.routers import auth, admin, courses, documents, chat, password, assignments, badges, attendance, analytics
 from app.services.badge_service import seed_default_achievements
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+
 
 app = FastAPI(
     title="SmartEdu API",

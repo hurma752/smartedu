@@ -128,14 +128,14 @@ export default function TeacherCourseDetail() {
               title="Lecture Materials"
               count={documents.length}
               action={
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", background: uploading ? C.textMuted : C.primary, color: C.primaryText, fontSize: "13px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                  <i className="ti ti-upload" style={{ fontSize: "14px" }} />
+                <label className="btn-interactive" style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "6px", background: uploading ? C.textMuted : C.primary, color: C.primaryText, fontSize: "13px", fontWeight: "600", cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                  <i className={`ti ${uploading ? "ti-loader-2" : "ti-upload"}`} style={{ fontSize: "14px", animation: uploading ? "spin 1s linear infinite" : "none" }} />
                   {uploading ? "Uploading…" : "Upload PDF"}
                   <input type="file" accept=".pdf" onChange={handleUpload} disabled={uploading} style={{ display: "none" }} />
                 </label>
               }
             />
-            <div style={{ padding: "8px 0" }}>
+            <div style={{ padding: "4px 0" }}>
               {documents.length === 0 ? (
                 <div style={{ padding: "40px 20px", textAlign: "center" }}>
                   <i className="ti ti-file-upload" style={{ fontSize: "30px", color: C.border, display: "block", marginBottom: "10px" }} />
@@ -217,30 +217,118 @@ function DocRow({ doc, last, onView, onDownload, onDelete }) {
   const [hovered, setHovered] = useState(false);
 
   const statusConfig = {
-    indexed:    { bg: C.successBg,  txt: C.successText,  label: `${doc.chunk_count} chunks indexed` },
-    processing: { bg: C.warningBg,  txt: C.warningText,  label: "Processing…"                       },
-    failed:     { bg: C.dangerBg,   txt: C.dangerText,   label: doc.error_message || "Failed"        },
-  }[doc.status] || { bg: C.subtleBg, txt: C.textMuted, label: doc.status };
+    indexed:    { bg: C.successBg,  txt: C.successText,  border: C.successBorder, label: `${doc.chunk_count} chunks indexed` },
+    processing: { bg: C.warningBg,  txt: C.warningText,  border: C.warningBorder, label: "Processing…"                       },
+    failed:     { bg: C.dangerBg,   txt: C.dangerText,   border: C.dangerBorder,  label: doc.error_message || "Failed"        },
+  }[doc.status] || { bg: C.subtleBg, txt: C.textMuted, border: C.border, label: doc.status };
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ display: "flex", alignItems: "center", gap: "14px", padding: "13px 18px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, transition: "background 0.12s" }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "16px",
+        padding: "14px 20px",
+        borderBottom: last ? "none" : `1px solid ${C.border}`,
+        background: hovered ? C.subtleBg : C.cardBg,
+        transition: "background 0.12s ease",
+      }}
     >
-      <i className="ti ti-file-type-pdf" style={{ fontSize: "20px", color: C.accent, flexShrink: 0 }} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <p style={{ fontSize: "14px", fontWeight: "500", color: C.textPrimary, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.filename}</p>
-        <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 7px", borderRadius: "4px", background: statusConfig.bg, color: statusConfig.txt }}>{statusConfig.label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: 1 }}>
+        <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: C.accentTint, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <i className="ti ti-file-type-pdf" style={{ fontSize: "20px", color: C.accent }} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary, margin: "0 0 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {doc.filename}
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: statusConfig.bg, color: statusConfig.txt, border: `1px solid ${statusConfig.border}` }}>
+              {statusConfig.label}
+            </span>
+            {doc.created_at && (
+              <span style={{ fontSize: "12px", color: C.textMuted }}>
+                Added {new Date(doc.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "14px", flexShrink: 0 }}>
+
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
         {doc.status === "indexed" && (
           <>
-            <button onClick={onView} style={{ fontSize: "13px", color: C.textSecondary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>View</button>
-            <button onClick={onDownload} style={{ fontSize: "13px", color: C.textSecondary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Download</button>
+            <button
+              onClick={onView}
+              title="View PDF lecture"
+              className="btn-interactive"
+              style={{
+                fontSize: "13px",
+                fontWeight: "500",
+                color: C.textPrimary,
+                background: C.cardBg,
+                border: `1px solid ${C.border}`,
+                borderRadius: "6px",
+                padding: "6px 12px",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <i className="ti ti-eye" style={{ fontSize: "14px" }} />
+              View
+            </button>
+
+            <button
+              onClick={onDownload}
+              title="Download PDF lecture"
+              className="btn-interactive"
+              style={{
+                fontSize: "13px",
+                fontWeight: "500",
+                color: C.textSecondary,
+                background: C.cardBg,
+                border: `1px solid ${C.border}`,
+                borderRadius: "6px",
+                padding: "6px 12px",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <i className="ti ti-download" style={{ fontSize: "14px" }} />
+              Download
+            </button>
           </>
         )}
-        <button onClick={onDelete} style={{ fontSize: "13px", color: C.dangerText, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Delete</button>
+
+        <button
+          onClick={onDelete}
+          title="Delete lecture document"
+          style={{
+            fontSize: "12px",
+            color: C.dangerText,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: "6px",
+            borderRadius: "4px",
+            fontFamily: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+          }}
+        >
+          <i className="ti ti-trash" style={{ fontSize: "15px" }} />
+        </button>
       </div>
     </div>
   );

@@ -109,6 +109,7 @@ function TeacherCourseCard({ course, navigate }) {
       <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "14px", marginTop: "14px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
         <button
           onClick={() => navigate(`/teacher/courses/${course.id}?tab=materials`)}
+          className="btn-interactive"
           style={{
             flex: 1,
             display: "inline-flex",
@@ -132,6 +133,7 @@ function TeacherCourseCard({ course, navigate }) {
 
         <button
           onClick={() => navigate(`/teacher/courses/${course.id}?tab=assignments`)}
+          className="btn-interactive"
           style={{
             flex: 1,
             display: "inline-flex",
@@ -155,6 +157,7 @@ function TeacherCourseCard({ course, navigate }) {
 
         <button
           onClick={() => navigate(`/teacher/courses/${course.id}?tab=students`)}
+          className="btn-interactive"
           style={{
             flex: 1,
             display: "inline-flex",

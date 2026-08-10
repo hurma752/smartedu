@@ -1022,7 +1022,12 @@ def get_course_progress_overview(course_id: int, db: Session,
             concern_detail = crit_insights[0]["detail"]
             recommended_action = crit_insights[0].get("recommended_action")
         elif warn_insights:
-            urgency = "medium"
+            # If student is low risk and has no critical trends/attendance issues,
+            # surface the insight on their profile rather than flagging as priority intervention
+            if p["risk"]["current_level"] in ("high", "medium"):
+                urgency = "medium"
+            else:
+                urgency = "low"
             primary_concern = warn_insights[0]["title"]
             concern_detail = warn_insights[0]["detail"]
             recommended_action = warn_insights[0].get("recommended_action")

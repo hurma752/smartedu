@@ -651,26 +651,58 @@ export default function AnalyticsPanel({ courseId }) {
           </div>
         </div>
 
-        {showModelDetails && modelSummary?.feature_importance && (
+        {showModelDetails && (
           <div style={{ padding: "16px 20px", borderTop: `1px solid ${C.border}`, background: C.subtleBg }}>
-            <p style={{ fontSize: "12px", color: C.textSecondary, margin: "0 0 12px" }}>
-              The relative weight each feature has when predicting whether a student needs intervention in this course:
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "10px" }}>
-              {Object.entries(modelSummary.feature_importance)
-                .sort((a, b) => b[1] - a[1])
-                .map(([key, importance]) => (
-                  <div key={key} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "7px", padding: "10px 12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
-                      <span style={{ color: C.textSecondary, fontWeight: "500" }}>{FEATURE_LABELS[key] || key}</span>
-                      <strong style={{ color: C.textPrimary }}>{(importance * 100).toFixed(0)}%</strong>
+            {modelSummary?.feature_importance ? (
+              <>
+                <p style={{ fontSize: "12px", color: C.textSecondary, margin: "0 0 12px" }}>
+                  The relative weight each feature has when predicting whether a student needs intervention in this course:
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "10px" }}>
+                  {Object.entries(modelSummary.feature_importance)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([key, importance]) => (
+                      <div key={key} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "7px", padding: "10px 12px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                          <span style={{ color: C.textSecondary, fontWeight: "500" }}>{FEATURE_LABELS[key] || key}</span>
+                          <strong style={{ color: C.textPrimary }}>{(importance * 100).toFixed(0)}%</strong>
+                        </div>
+                        <div style={{ height: "5px", background: C.subtleBg, borderRadius: "4px", overflow: "hidden", border: `1px solid ${C.border}` }}>
+                          <div style={{ height: "100%", width: `${importance * 100}%`, background: C.accent, borderRadius: "4px" }} />
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: C.textSecondary, fontSize: "12.5px" }}>
+                  <i className="ti ti-info-circle" style={{ color: C.accent, fontSize: "16px" }} />
+                  <span>
+                    <strong>Rule-Based Heuristic Evaluation Active:</strong> Risk scores are currently assessed based on foundational course indicators.
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px", marginTop: "4px" }}>
+                  {[
+                    { label: "Grade Average Threshold", desc: "Grades below 50% trigger risk flags", icon: "ti-certificate" },
+                    { label: "Attendance Threshold", desc: "Session presence below 60% flags intervention", icon: "ti-calendar-event" },
+                    { label: "Missing Assignment Rate", desc: "Unsubmitted work above 40% raises risk priority", icon: "ti-file-x" },
+                    { label: "Late Submissions & Engagement", desc: "Late submissions and LMS chat engagement activity", icon: "ti-messages" },
+                  ].map((rule, idx) => (
+                    <div key={idx} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "7px", padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
+                        <i className={`ti ${rule.icon}`} style={{ color: C.accent, fontSize: "14px" }} />
+                        <span style={{ fontSize: "12px", fontWeight: "600", color: C.textPrimary }}>{rule.label}</span>
+                      </div>
+                      <p style={{ fontSize: "11.5px", color: C.textMuted, margin: 0 }}>{rule.desc}</p>
                     </div>
-                    <div style={{ height: "5px", background: C.subtleBg, borderRadius: "4px", overflow: "hidden", border: `1px solid ${C.border}` }}>
-                      <div style={{ height: "100%", width: `${importance * 100}%`, background: C.accent, borderRadius: "4px" }} />
-                    </div>
-                  </div>
-                ))}
-            </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: "11.5px", color: C.textMuted, margin: "6px 0 0" }}>
+                  💡 <em>Click <strong>"Recompute Model"</strong> to train a supervised RandomForest classifier when course has sufficient student records (4+ students).</em>
+                </p>
+              </div>
+            )}
           </div>
         )}
       </Card>

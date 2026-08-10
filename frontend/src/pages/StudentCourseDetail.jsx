@@ -532,29 +532,82 @@ function DocRow({ doc, last, onView, onDownload }) {
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ display: "flex", alignItems: "center", gap: "14px", padding: "13px 18px", borderBottom: last ? "none" : `1px solid ${C.border}`, background: hovered ? C.subtleBg : C.cardBg, transition: "background 0.12s" }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "16px",
+        padding: "14px 20px",
+        borderBottom: last ? "none" : `1px solid ${C.border}`,
+        background: hovered ? C.subtleBg : C.cardBg,
+        transition: "background 0.12s ease",
+      }}
     >
-      <i className="ti ti-file-type-pdf" style={{ fontSize: "20px", color: C.accent, flexShrink: 0 }} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <p style={{ fontSize: "14px", fontWeight: "500", color: C.textPrimary, margin: "0 0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.filename}</p>
-        {doc.created_at && <p style={{ fontSize: "11px", color: C.textMuted, margin: 0 }}>Added {new Date(doc.created_at).toLocaleDateString()}</p>}
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: 1 }}>
+        <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: C.accentTint, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <i className="ti ti-file-type-pdf" style={{ fontSize: "20px", color: C.accent }} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p style={{ fontSize: "14px", fontWeight: "600", color: C.textPrimary, margin: "0 0 3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {doc.filename}
+          </p>
+          {doc.created_at && (
+            <p style={{ fontSize: "12px", color: C.textMuted, margin: 0 }}>
+              Added {new Date(doc.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}
+            </p>
+          )}
+        </div>
       </div>
-      <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-        <ActionBtn icon="ti-eye"      label="View"     onClick={onView}     />
-        <ActionBtn icon="ti-download" label="Download" onClick={onDownload} />
+
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+        <button
+          onClick={onView}
+          title="View PDF lecture"
+          className="btn-interactive"
+          style={{
+            fontSize: "13px",
+            fontWeight: "500",
+            color: C.textPrimary,
+            background: C.cardBg,
+            border: `1px solid ${C.border}`,
+            borderRadius: "6px",
+            padding: "6px 12px",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <i className="ti ti-eye" style={{ fontSize: "14px" }} />
+          View
+        </button>
+
+        <button
+          onClick={onDownload}
+          title="Download PDF lecture"
+          className="btn-interactive"
+          style={{
+            fontSize: "13px",
+            fontWeight: "500",
+            color: C.textSecondary,
+            background: C.cardBg,
+            border: `1px solid ${C.border}`,
+            borderRadius: "6px",
+            padding: "6px 12px",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <i className="ti ti-download" style={{ fontSize: "14px" }} />
+          Download
+        </button>
       </div>
     </div>
-  );
-}
-
-function ActionBtn({ icon, label, onClick }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{ fontSize: "13px", fontWeight: "500", color: C.textSecondary, background: hovered ? C.subtleBg : "none", border: `1px solid ${C.border}`, borderRadius: "6px", padding: "5px 11px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "5px", transition: "background 0.1s" }}>
-      <i className={`ti ${icon}`} style={{ fontSize: "13px" }} />{label}
-    </button>
   );
 }
