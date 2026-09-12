@@ -35,30 +35,30 @@ export async function sendMessageStream(courseId, message, sessionId, onChunk, s
 }
 
 export function sendMessage(courseId, message, sessionId) {
-  return client.post("/api/chat/", { course_id: courseId, message, session_id: sessionId || "default" });
+  return client.post("/chat/", { course_id: courseId, message, session_id: sessionId || "default" });
 }
 
 export function getChatHistory(courseId, sessionId) {
   const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
-  return client.get(`/api/chat/history/${courseId}${params}`);
+  return client.get(`/chat/history/${courseId}${params}`);
 }
 
 export function listChatSessions(courseId) {
-  return client.get(`/api/chat/sessions/${courseId}`);
+  return client.get(`/chat/sessions/${courseId}`);
 }
 
 export function deleteChatSession(sessionId) {
-  return client.delete(`/api/chat/session/${encodeURIComponent(sessionId)}`);
+  return client.delete(`/chat/session/${encodeURIComponent(sessionId)}`);
 }
 
 export function clearChatHistory(courseId) {
-  return client.delete(`/api/chat/history/${courseId}`);
+  return client.delete(`/chat/history/${courseId}`);
 }
 
 export function deleteChatMessage(messageId) {
-  return client.delete(`/api/chat/message/${messageId}`);
+  return client.delete(`/chat/message/${messageId}`);
 }
 
 export function editChatMessage(messageId, message) {
-  return client.put(`/api/chat/message/${messageId}`, { message });
+  return client.put(`/chat/message/${messageId}`, { message });
 }

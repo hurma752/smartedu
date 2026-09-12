@@ -262,6 +262,11 @@ export default function TeacherSubmissions() {
                 <OCRBlock
                   text={selected.extracted_text}
                   confidence={selected.extraction_confidence}
+                  engine={selected.ocr_engine_used}
+                  status={selected.extraction_status}
+                  processingTime={selected.ocr_processing_time}
+                  submissionId={selected.id}
+                  onReprocess={loadSubmissions}
                 />
               )}
 
@@ -613,22 +618,81 @@ function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
   );
 }
 
-function OCRBlock({ text, confidence }) {
+function OCRBlock({ text, confidence, engine, status, processingTime, submissionId, onReprocess }) {
   const [open, setOpen] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
+
+  const handleReprocess = async (e) => {
+    e.stopPropagation();
+    if (!submissionId) return;
+    setReprocessing(true);
+    try {
+      await assignmentsApi.reprocessOcr(submissionId);
+      if (onReprocess) onReprocess();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Failed to trigger OCR re-processing");
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
+  const engineLabel = {
+    tesseract: "Tesseract",
+    trocr: "TrOCR (handwriting)",
+    "tesseract+trocr": "Tesseract + TrOCR",
+    tesseract_fallback: "Tesseract (fallback)",
+  }[engine] || engine;
+
   return (
     <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
       <button
         onClick={() => setOpen(!open)}
-        style={{ width: "100%", padding: "12px 16px", background: "none", border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontFamily: "inherit" }}
+        style={{ width: "100%", padding: "12px 16px", background: "none", border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontFamily: "inherit", flexWrap: "wrap", gap: "8px" }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
           <i className="ti ti-scan" style={{ fontSize: "16px", color: C.accent }} />
           <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Extracted OCR Text</span>
-          {confidence !== undefined && (
-            <span style={{ fontSize: "11px", color: C.textMuted }}>({Math.round(confidence * 100)}% confidence)</span>
+          {engine && (
+            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary }}>
+              Engine: {engineLabel}
+            </span>
+          )}
+          {confidence != null && (
+            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary }}>
+              Confidence: {Math.round(confidence)}%
+            </span>
+          )}
+          {status && (
+            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary }}>
+              Status: {status.replace(/_/g, " ")}
+            </span>
+          )}
+          {processingTime != null && (
+            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textMuted }}>
+              {processingTime}s
+            </span>
           )}
         </div>
-        <i className={`ti ${open ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "14px", color: C.textMuted }} />
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {submissionId && (
+            <button
+              onClick={handleReprocess}
+              disabled={reprocessing}
+              className="btn-interactive"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: "3px 8px", borderRadius: "5px",
+                background: C.subtleBg, border: `1px solid ${C.border}`,
+                color: C.textSecondary, fontSize: "11px", fontWeight: "600",
+                cursor: reprocessing ? "not-allowed" : "pointer",
+              }}
+            >
+              <i className={`ti ${reprocessing ? "ti-loader-2" : "ti-refresh"}`} style={{ fontSize: "11px", animation: reprocessing ? "spin 1s linear infinite" : "none" }} />
+              Reprocess OCR
+            </button>
+          )}
+          <i className={`ti ${open ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "14px", color: C.textMuted }} />
+        </div>
       </button>
       {open && (
         <div style={{ padding: "0 16px 14px", borderTop: `1px solid ${C.border}` }}>

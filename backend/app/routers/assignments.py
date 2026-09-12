@@ -295,6 +295,41 @@ async def submit_assignment(
     return submission
 
 
+# ---------- Teacher: manual re-run OCR for a submission ----------
+@router.post("/submissions/{submission_id}/reprocess-ocr")
+def reprocess_ocr(
+    submission_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+    get_course_for_access(submission.assignment.course_id, current_user, db)
+
+    if not submission.file_path or not os.path.exists(submission.file_path):
+        raise HTTPException(400, "Submission PDF file not found on disk")
+
+    submission.extracted_text = None  # force re-extraction, bypassing cache
+    submission.extraction_method = None
+    submission.extraction_confidence = None
+    submission.ocr_engine_used = None
+    submission.extraction_status = None
+    submission.ocr_processing_time = None
+    submission.status = "processing"
+    submission.error_message = None
+    db.commit()
+
+    background_tasks.add_task(
+        evaluate_submission_task,
+        submission_id=submission.id,
+        file_path=submission.file_path,
+        db_session_factory=SessionLocal,
+    )
+    return {"status": "reprocessing"}
+
+
 # ---------- Student: check own submission status ----------
 @router.get("/submissions/{submission_id}", response_model=SubmissionResponse)
 def get_submission_status(

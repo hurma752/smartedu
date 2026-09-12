@@ -54,6 +54,9 @@ class SubmissionResponse(BaseModel):
     extracted_text: Optional[str] = None
     extraction_method: Optional[str] = None
     extraction_confidence: Optional[int] = None
+    ocr_engine_used: Optional[str] = None
+    extraction_status: Optional[str] = None
+    ocr_processing_time: Optional[float] = None
     ai_score: Optional[float] = None          # None until detection runs
     plagiarism_score: Optional[float] = None  # None until detection runs
     detection_status: Optional[str] = None    # None until detection runs

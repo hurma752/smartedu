@@ -70,6 +70,13 @@ export default function StudentCourseDetail() {
     loadHistory();
   }, [courseId, loadHistory]);
 
+  // Always keep localStorage in sync with the active session, including the very
+  // first auto-generated sessionId (which otherwise never got persisted, causing
+  // a fresh session — and therefore empty history — on every app reopen).
+  useEffect(() => {
+    localStorage.setItem(`smartedu_session_${courseId}`, sessionId);
+  }, [courseId, sessionId]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, chatting]);
@@ -260,159 +267,175 @@ export default function StudentCourseDetail() {
 
         {/* ── AI Chatbot ── */}
         {activeTab === "chatbot" && (
-          <div style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: "460px", overflow: "hidden" }}>
+          <div style={{ background: C.cardBg, borderRadius: "10px", border: `1px solid ${C.border}`, display: "flex", height: "calc(100vh - 200px)", minHeight: "460px", overflow: "hidden" }}>
 
-            {/* Chatbot Header with New Chat & Saved Chat Sessions Selector */}
-            <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.subtleBg, flexWrap: "wrap", gap: "10px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <i className="ti ti-sparkles" style={{ fontSize: "18px", color: C.accent }} />
-                <span style={{ fontSize: "14px", fontWeight: "700", color: C.textPrimary }}>SmartEdu AI Assistant</span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                {sessions.length > 0 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <select
-                      value={sessionId}
-                      onChange={(e) => handleSwitchSession(e.target.value)}
-                      style={{
-                        background: C.cardBg,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: "6px",
-                        padding: "6px 10px",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        color: C.textPrimary,
-                        fontFamily: "inherit",
-                        cursor: "pointer",
-                        outline: "none",
-                        maxWidth: "180px",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis"
-                      }}
-                    >
-                      <option value={sessionId}>Current Conversation</option>
-                      {sessions.filter(s => s.session_id !== sessionId).map(s => (
-                        <option key={s.session_id} value={s.session_id}>
-                          {s.title}
-                        </option>
-                      ))}
-                    </select>
-                    {sessions.length > 1 && (
-                      <button
-                        onClick={() => handleDeleteSession(sessionId)}
-                        title="Delete active chat session"
-                        style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", padding: "4px", display: "inline-flex" }}
-                      >
-                        <i className="ti ti-trash" style={{ fontSize: "14px" }} />
-                      </button>
-                    )}
-                  </div>
-                )}
-
+            {/* ── Sidebar: New Chat + Chat History ── */}
+            <div style={{ width: "260px", flexShrink: 0, display: "flex", flexDirection: "column", background: C.subtleBg, borderRight: `1px solid ${C.border}` }}>
+              <div style={{ padding: "14px 14px 10px" }}>
                 <button
                   onClick={handleNewChat}
                   className="btn-interactive"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 12px", borderRadius: "6px", background: C.cardBg, border: `1px solid ${C.border}`, color: C.textSecondary, fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
+                  style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px", padding: "9px 12px", borderRadius: "7px", background: C.primary, border: "none", color: C.primaryText, fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "inherit" }}
                 >
                   <i className="ti ti-plus" style={{ fontSize: "14px" }} />
                   New Chat
                 </button>
               </div>
+
+              <div style={{ padding: "4px 14px 6px", fontSize: "11px", fontWeight: "700", color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                History
+              </div>
+
+              <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
+                {sessions.length === 0 ? (
+                  <div style={{ padding: "10px 8px", fontSize: "12px", color: C.textMuted, lineHeight: "1.5" }}>
+                    No past conversations yet — start chatting and it'll show up here.
+                  </div>
+                ) : (
+                  sessions.map((s) => {
+                    const isActive = s.session_id === sessionId;
+                    return (
+                      <div
+                        key={s.session_id}
+                        onClick={() => handleSwitchSession(s.session_id)}
+                        className="btn-interactive"
+                        style={{
+                          display: "flex", alignItems: "center", gap: "6px",
+                          padding: "9px 10px", borderRadius: "8px", marginBottom: "3px",
+                          cursor: "pointer",
+                          background: isActive ? C.cardBg : "transparent",
+                          border: `1px solid ${isActive ? C.border : "transparent"}`,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: "12.5px", fontWeight: isActive ? "700" : "500",
+                            color: isActive ? C.textPrimary : C.textSecondary,
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          }}>
+                            {s.title}
+                          </div>
+                          {s.last_updated && (
+                            <div style={{ fontSize: "10.5px", color: C.textMuted, marginTop: "1px" }}>
+                              {new Date(s.last_updated).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.session_id); }}
+                          title="Delete this chat"
+                          style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", padding: "3px", display: "inline-flex", flexShrink: 0 }}
+                        >
+                          <i className="ti ti-trash" style={{ fontSize: "13px" }} />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
 
-            {/* Messages */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "20px 20px 0" }}>
-              {messages.map((msg, i) => (
-                <MessageBubble
-                  key={msg.id || i}
-                  msg={msg}
-                  index={i}
-                  isEditing={editingId === (msg.id || msg.content)}
-                  editText={editText}
-                  setEditText={setEditText}
-                  onStartEdit={() => handleStartEdit(msg)}
-                  onSaveEdit={() => handleSaveEdit(msg, i)}
-                  onCancelEdit={() => setEditingId(null)}
-                  onDelete={() => handleDeleteMessage(msg.id, i)}
-                />
-              ))}
+            {/* ── Main chat pane ── */}
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
 
-              {/* Typing indicator — shown only while streaming AND no content yet */}
-              {chatting && messages[messages.length - 1]?.content === "" && (
-                <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: "12px" }}>
-                  <AssistantAvatar />
-                  <div style={{ background: C.subtleBg, borderRadius: "12px", borderBottomLeftRadius: "3px", padding: "12px 16px", display: "flex", gap: "8px", alignItems: "center", border: `1px solid ${C.border}` }}>
-                    <i className="ti ti-sparkles" style={{ fontSize: "15px", color: C.accent, animation: "spin 2s linear infinite" }} />
-                    <span style={{ fontSize: "13px", fontWeight: "600", color: C.textSecondary }}>AI is processing course materials…</span>
-                    <div style={{ display: "flex", gap: "4px", marginLeft: "4px" }}>
-                      {[0, 150, 300].map((delay) => (
-                        <span key={delay} style={{ width: "6px", height: "6px", background: C.accent, borderRadius: "50%", display: "inline-block", animation: "bounce 1s infinite", animationDelay: `${delay}ms` }} />
-                      ))}
+              {/* Header */}
+              <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px", background: C.subtleBg }}>
+                <i className="ti ti-sparkles" style={{ fontSize: "18px", color: C.accent }} />
+                <span style={{ fontSize: "14px", fontWeight: "700", color: C.textPrimary }}>SmartEdu AI Assistant</span>
+              </div>
+
+              {/* Messages */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "20px 20px 0" }}>
+                {messages.map((msg, i) => (
+                  <MessageBubble
+                    key={msg.id || i}
+                    msg={msg}
+                    index={i}
+                    isEditing={editingId === (msg.id || msg.content)}
+                    editText={editText}
+                    setEditText={setEditText}
+                    onStartEdit={() => handleStartEdit(msg)}
+                    onSaveEdit={() => handleSaveEdit(msg, i)}
+                    onCancelEdit={() => setEditingId(null)}
+                    onDelete={() => handleDeleteMessage(msg.id, i)}
+                  />
+                ))}
+
+                {/* Typing indicator — shown only while streaming AND no content yet */}
+                {chatting && messages[messages.length - 1]?.content === "" && (
+                  <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: "12px" }}>
+                    <AssistantAvatar />
+                    <div style={{ background: C.subtleBg, borderRadius: "12px", borderBottomLeftRadius: "3px", padding: "12px 16px", display: "flex", gap: "8px", alignItems: "center", border: `1px solid ${C.border}` }}>
+                      <i className="ti ti-sparkles" style={{ fontSize: "15px", color: C.accent, animation: "spin 2s linear infinite" }} />
+                      <span style={{ fontSize: "13px", fontWeight: "600", color: C.textSecondary }}>AI is processing course materials…</span>
+                      <div style={{ display: "flex", gap: "4px", marginLeft: "4px" }}>
+                        {[0, 150, 300].map((delay) => (
+                          <span key={delay} style={{ width: "6px", height: "6px", background: C.accent, borderRadius: "50%", display: "inline-block", animation: "bounce 1s infinite", animationDelay: `${delay}ms` }} />
+                        ))}
+                      </div>
                     </div>
                   </div>
+                )}
+                <div ref={endRef} style={{ height: "20px" }} />
+              </div>
+
+              {/* Suggestion Chips */}
+              {messages.length <= 2 && !chatting && (
+                <div style={{ padding: "0 20px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {[
+                    "Summarize available lectures",
+                    "What assignments are due?",
+                    "How is plagiarism evaluated?",
+                    "Who is the course instructor?"
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => handleSend(chip)}
+                      className="btn-interactive"
+                      style={{
+                        background: C.subtleBg, border: `1px solid ${C.border}`,
+                        borderRadius: "16px", padding: "6px 12px", fontSize: "12px",
+                        color: C.textSecondary, cursor: "pointer", fontFamily: "inherit"
+                      }}
+                    >
+                      💡 {chip}
+                    </button>
+                  ))}
                 </div>
               )}
-              <div ref={endRef} style={{ height: "20px" }} />
-            </div>
 
-            {/* Suggestion Chips */}
-            {messages.length <= 2 && !chatting && (
-              <div style={{ padding: "0 20px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {[
-                  "Summarize available lectures",
-                  "What assignments are due?",
-                  "How is plagiarism evaluated?",
-                  "Who is the course instructor?"
-                ].map((chip) => (
+              {/* Input row */}
+              <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", gap: "10px", alignItems: "center" }}>
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !chatting && handleSend()}
+                  placeholder="Ask about this course, lectures, or assignments…"
+                  disabled={chatting}
+                  style={{ flex: 1, background: C.inputBg, border: "1.5px solid transparent", borderRadius: "7px", padding: "10px 13px", fontSize: "14px", color: C.textPrimary, fontFamily: "inherit", outline: "none", opacity: chatting ? 0.6 : 1 }}
+                  onFocus={(e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; }}
+                  onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = C.inputBg; e.target.style.boxShadow = "none"; }}
+                />
+
+                {chatting ? (
                   <button
-                    key={chip}
-                    onClick={() => handleSend(chip)}
-                    className="btn-interactive"
-                    style={{
-                      background: C.subtleBg, border: `1px solid ${C.border}`,
-                      borderRadius: "16px", padding: "6px 12px", fontSize: "12px",
-                      color: C.textSecondary, cursor: "pointer", fontFamily: "inherit"
-                    }}
+                    onClick={handleStop}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 16px", borderRadius: "7px", border: `1.5px solid ${C.dangerBorder}`, background: C.dangerBg, color: C.dangerText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", flexShrink: 0, transition: "background 0.12s" }}
                   >
-                    💡 {chip}
+                    <i className="ti ti-player-stop-filled" style={{ fontSize: "14px" }} />Stop
                   </button>
-                ))}
+                ) : (
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!input.trim()}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 18px", borderRadius: "7px", background: C.primary, color: C.primaryText, border: "none", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: !input.trim() ? "not-allowed" : "pointer", opacity: !input.trim() ? 0.4 : 1, flexShrink: 0 }}
+                  >
+                    <i className="ti ti-send" style={{ fontSize: "15px" }} />Send
+                  </button>
+                )}
               </div>
-            )}
-
-            {/* Input row */}
-            <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", gap: "10px", alignItems: "center" }}>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !chatting && handleSend()}
-                placeholder="Ask about this course, lectures, or assignments…"
-                disabled={chatting}
-                style={{ flex: 1, background: C.inputBg, border: "1.5px solid transparent", borderRadius: "7px", padding: "10px 13px", fontSize: "14px", color: C.textPrimary, fontFamily: "inherit", outline: "none", opacity: chatting ? 0.6 : 1 }}
-                onFocus={(e) => { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; }}
-                onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = C.inputBg; e.target.style.boxShadow = "none"; }}
-              />
-
-              {chatting ? (
-                <button
-                  onClick={handleStop}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 16px", borderRadius: "7px", border: `1.5px solid ${C.dangerBorder}`, background: C.dangerBg, color: C.dangerText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", flexShrink: 0, transition: "background 0.12s" }}
-                >
-                  <i className="ti ti-player-stop-filled" style={{ fontSize: "14px" }} />Stop
-                </button>
-              ) : (
-                <button
-                  onClick={() => handleSend()}
-                  disabled={!input.trim()}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "10px 18px", borderRadius: "7px", background: C.primary, color: C.primaryText, border: "none", fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: !input.trim() ? "not-allowed" : "pointer", opacity: !input.trim() ? 0.4 : 1, flexShrink: 0 }}
-                >
-                  <i className="ti ti-send" style={{ fontSize: "15px" }} />Send
-                </button>
-              )}
+              <style>{`@keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }`}</style>
             </div>
-            <style>{`@keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }`}</style>
           </div>
         )}
       </PageShell>

@@ -155,13 +155,17 @@ def evaluate_submission_task(submission_id: int, file_path: str, db_session_fact
             submission.extraction_confidence = (
                 round(extraction["confidence"]) if extraction["confidence"] is not None else None
             )
+            submission.ocr_engine_used = extraction.get("ocr_engine_used")
+            submission.extraction_status = extraction.get("extraction_status")
+            submission.ocr_processing_time = extraction.get("processing_time")
 
             if extraction["low_confidence"]:
                 submission.status = "failed"
+                conf_str = f"{extraction['confidence']:.0f}%" if extraction['confidence'] is not None else "N/A"
+                engine_str = f" using {extraction['ocr_engine_used']}" if extraction.get('ocr_engine_used') else ""
                 submission.error_message = (
-                    f"OCR confidence was too low ({extraction['confidence']:.0f}%) to reliably "
-                    "evaluate this submission. Please ask the student to resubmit a clearer scan "
-                    "or a typed document."
+                    f"Text extraction confidence was too low ({conf_str}){engine_str} to reliably "
+                    "evaluate this submission. Please ask the student to resubmit a clearer scan."
                 )
                 db.commit()
                 return

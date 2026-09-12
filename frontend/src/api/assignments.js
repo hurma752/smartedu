@@ -82,3 +82,6 @@ export const getPlagiarismReport = (submissionId) =>
 
 export const recomputePlagiarism = (assignmentId) =>
   client.post(`/assignments/${assignmentId}/plagiarism/recompute`);
+
+export const reprocessOcr = (submissionId) =>
+  client.post(`/assignments/submissions/${submissionId}/reprocess-ocr`);
