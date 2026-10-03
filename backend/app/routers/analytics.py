@@ -2,6 +2,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
+import os
+import joblib
+import numpy as np
+from sqlalchemy import func
+from app.models.models import (
+    ClassSession, AttendanceRecord, Assignment, 
+    Submission, FinalGrade, EngagementEvent, StudentRiskAssessment
+)
 
 from app.database.db import get_db
 from app.models.models import User, Enrollment
@@ -121,3 +129,106 @@ def get_course_progress_overview_endpoint(
         granularity=granularity,
         periods=periods,
     )
+
+MODEL_PATH = "app/ml/risk_model.pkl"
+
+def load_ml_model():
+    if os.path.exists(MODEL_PATH):
+        return joblib.load(MODEL_PATH)
+    return None
+
+
+@router.post("/{course_id}/students/{student_id}/assess-risk")
+def assess_student_risk_ml(
+    course_id: int,
+    student_id: int,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    """
+    ML-based individual risk assessment using Random Forest classifier.
+    Extracts live attendance, submission, grade, and engagement metrics from the DB.
+    """
+    # 1. Access Control & Enrollment Check
+    get_course_for_access(course_id, current_user, db)
+    
+    enrolled = db.query(Enrollment).filter(
+        Enrollment.course_id == course_id,
+        Enrollment.student_id == student_id,
+    ).first()
+    if not enrolled:
+        raise HTTPException(404, "Student is not enrolled in this course")
+
+    # 2. Extract Attendance Rate
+    total_sessions = db.query(ClassSession).filter(ClassSession.course_id == course_id).count()
+    if total_sessions > 0:
+        attended = db.query(AttendanceRecord).join(ClassSession).filter(
+            ClassSession.course_id == course_id,
+            AttendanceRecord.student_id == student_id,
+            AttendanceRecord.status == "present"
+        ).count()
+        attendance_rate = attended / total_sessions
+    else:
+        attendance_rate = 1.0
+
+    # 3. Extract Submission Rate
+    total_assignments = db.query(Assignment).filter(Assignment.course_id == course_id).count()
+    if total_assignments > 0:
+        submitted = db.query(Submission).join(Assignment).filter(
+            Assignment.course_id == course_id,
+            Submission.student_id == student_id
+        ).count()
+        submission_rate = submitted / total_assignments
+    else:
+        submission_rate = 1.0
+
+    # 4. Extract Average Grade
+    avg_grade_res = db.query(func.avg(FinalGrade.total_score)).join(Submission).join(Assignment).filter(
+        Assignment.course_id == course_id,
+        Submission.student_id == student_id
+    ).scalar()
+    avg_grade = float(avg_grade_res) if avg_grade_res is not None else 100.0
+
+    # 5. Extract Engagement Events
+    engagement_count = db.query(EngagementEvent).filter(
+        EngagementEvent.course_id == course_id,
+        EngagementEvent.student_id == student_id
+    ).count()
+
+    # 6. Model Prediction
+    model = load_ml_model()
+    if not model:
+        raise HTTPException(500, "ML Model file 'app/ml/risk_model.pkl' not found. Run training script first.")
+
+    features = np.array([[attendance_rate, submission_rate, avg_grade, engagement_count]])
+    predicted_risk = model.predict(features)[0]
+    probabilities = model.predict_proba(features)[0]
+
+    class_labels = list(model.classes_)
+    high_risk_idx = class_labels.index("high") if "high" in class_labels else -1
+    risk_score = float(probabilities[high_risk_idx]) if high_risk_idx != -1 else 0.5
+
+    # 7. Persist Assessment to DB
+    assessment = StudentRiskAssessment(
+        student_id=student_id,
+        course_id=course_id,
+        risk_level=predicted_risk,
+        risk_score=risk_score,
+        factors={
+            "attendance_rate": round(attendance_rate, 2),
+            "submission_rate": round(submission_rate, 2),
+            "avg_grade": round(avg_grade, 2),
+            "engagement_count": engagement_count
+        }
+    )
+    db.add(assessment)
+    db.commit()
+    db.refresh(assessment)
+
+    return {
+        "student_id": student_id,
+        "course_id": course_id,
+        "risk_level": predicted_risk,
+        "risk_score": round(risk_score, 2),
+        "contributing_factors": assessment.factors
+    }
