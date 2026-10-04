@@ -710,6 +710,7 @@ export default function AnalyticsPanel({ courseId }) {
       {/* ── 6. Student Detail Modal / Slide-over Drawer ── */}
       {selectedStudent && (
         <StudentDetailModal
+          courseId={courseId}
           student={selectedStudent}
           onClose={() => setSelectedStudent(null)}
         />
@@ -885,8 +886,24 @@ function SmoothCohortSvgChart({ trajectory, seriesKey }) {
 }
 
 // ── Student Detail Modal ──
-function StudentDetailModal({ student, onClose }) {
+function StudentDetailModal({ courseId, student, onClose }) {
   const trend = TREND_CONFIG[student.trend_direction] || TREND_CONFIG.insufficient_data;
+  const [mlResult, setMlResult] = useState(null);
+  const [mlLoading, setMlLoading] = useState(false);
+  const [mlError, setMlError] = useState("");
+
+  const handleRunMlAssessment = async () => {
+    setMlLoading(true);
+    setMlError("");
+    try {
+      const res = await analyticsApi.assessStudentRiskML(courseId, student.student_id);
+      setMlResult(res.data);
+    } catch (err) {
+      setMlError(getErrorMessage(err, "ML assessment failed. Make sure risk_model.pkl exists."));
+    } finally {
+      setMlLoading(false);
+    }
+  };
 
   return (
     <div
@@ -998,6 +1015,46 @@ function StudentDetailModal({ student, onClose }) {
               </div>
             </div>
           )}
+
+          {/* Random Forest ML Risk Assessment (Arooba's Feature) */}
+          <div style={{ background: C.subtleBg, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: mlResult || mlError ? "12px" : 0 }}>
+              <div>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: C.textPrimary, display: "flex", alignItems: "center", gap: "6px" }}>
+                  <i className="ti ti-brain" style={{ color: C.accent }} /> Random Forest ML Risk Assessment
+                </span>
+                <span style={{ fontSize: "11.5px", color: C.textMuted }}>
+                  Evaluates attendance, submission rate, grades & chat engagement via trained RF model
+                </span>
+              </div>
+              <Btn size="sm" onClick={handleRunMlAssessment} disabled={mlLoading}>
+                {mlLoading ? "Assessing..." : "Run RF Model"}
+              </Btn>
+            </div>
+
+            {mlError && <Alert variant="error">{mlError}</Alert>}
+
+            {mlResult && (
+              <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "8px", padding: "12px", marginTop: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: C.textSecondary }}>
+                    Predicted Risk Level:
+                  </span>
+                  <Badge variant={RISK_VARIANT[mlResult.risk_level] || "neutral"}>
+                    {mlResult.risk_level.toUpperCase()} (Score: {(mlResult.risk_score * 100).toFixed(0)}%)
+                  </Badge>
+                </div>
+                {mlResult.contributing_factors && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px", fontSize: "11.5px" }}>
+                    <div style={{ color: C.textMuted }}>Attendance Rate: <strong style={{ color: C.textPrimary }}>{(mlResult.contributing_factors.attendance_rate * 100).toFixed(0)}%</strong></div>
+                    <div style={{ color: C.textMuted }}>Submission Rate: <strong style={{ color: C.textPrimary }}>{(mlResult.contributing_factors.submission_rate * 100).toFixed(0)}%</strong></div>
+                    <div style={{ color: C.textMuted }}>Average Grade: <strong style={{ color: C.textPrimary }}>{mlResult.contributing_factors.avg_grade}%</strong></div>
+                    <div style={{ color: C.textMuted }}>Engagement Count: <strong style={{ color: C.textPrimary }}>{mlResult.contributing_factors.engagement_count} events</strong></div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Actionable Insights */}
           {student.insights && student.insights.length > 0 && (

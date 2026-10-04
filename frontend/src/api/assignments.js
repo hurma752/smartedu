@@ -85,3 +85,9 @@ export const recomputePlagiarism = (assignmentId) =>
 
 export const reprocessOcr = (submissionId) =>
   client.post(`/assignments/submissions/${submissionId}/reprocess-ocr`);
+
+export const updateExtractedText = (submissionId, extractedText) =>
+  client.put(`/assignments/submissions/${submissionId}/extracted-text`, { extracted_text: extractedText });
+
+export const getPageImageUrl = (submissionId, pageNum = 1) =>
+  `/api/assignments/submissions/${submissionId}/page-image?page_num=${pageNum}`;

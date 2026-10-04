@@ -130,11 +130,15 @@ def get_course_progress_overview_endpoint(
         periods=periods,
     )
 
-MODEL_PATH = "app/ml/risk_model.pkl"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "ml", "risk_model.pkl")
 
 def load_ml_model():
     if os.path.exists(MODEL_PATH):
         return joblib.load(MODEL_PATH)
+    rel_path = os.path.join("app", "ml", "risk_model.pkl")
+    if os.path.exists(rel_path):
+        return joblib.load(rel_path)
     return None
 
 
