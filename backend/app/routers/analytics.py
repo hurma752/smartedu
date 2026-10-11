@@ -35,17 +35,6 @@ def get_course_risk(
     return analytics_service.compute_course_risk(course_id, db)
 
 
-@router.post("/{course_id}/risk/recompute", response_model=CourseRiskSummary)
-def recompute_course_risk(
-    course_id: int,
-    current_user: User = Depends(require_role("teacher")),
-    db: Session = Depends(get_db),
-):
-    """Forces a fresh recompute — call after new grades/attendance are entered."""
-    get_course_for_access(course_id, current_user, db)
-    return analytics_service.compute_course_risk(course_id, db)
-
-
 @router.get("/{course_id}/students/{student_id}/progress", response_model=StudentProgressResponse)
 def get_student_progress_endpoint(
     course_id: int,
