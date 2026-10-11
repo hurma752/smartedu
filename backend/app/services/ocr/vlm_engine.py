@@ -22,7 +22,7 @@ import ollama
 
 logger = logging.getLogger("smartedu.ocr.vlm")
 
-# Default model: qwen3-vl:4b (supports qwen3-vl:8b as well)
+OCR_VLM_ENABLED = os.getenv("OCR_VLM_ENABLED", "true").lower() in ("true", "1", "yes")
 OCR_VLM_MODEL = os.getenv("OCR_VLM_MODEL", "qwen3-vl:4b").lower()
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 VLM_TIMEOUT = float(os.getenv("VLM_TIMEOUT", "300.0"))  # 5 minutes minimum
@@ -49,6 +49,11 @@ class VLMEngine:
         return cls._instance
 
     def _check_availability(self):
+        if not OCR_VLM_ENABLED:
+            logger.info("OCR VLM is disabled (OCR_VLM_ENABLED=false). Using TrOCR-only pipeline.")
+            self._available = False
+            return
+
         try:
             logger.info("Checking Ollama server and VLM model '%s' at %s...", OCR_VLM_MODEL, OLLAMA_HOST)
             client = ollama.Client(host=OLLAMA_HOST, timeout=10.0)
@@ -129,9 +134,9 @@ class VLMEngine:
             img_bytes = img_buffer.getvalue()
 
             prompt = (
-                "Transcribe this handwritten page exactly as written, line by line. "
-                "Preserve spelling mistakes and punctuation. Do NOT correct, summarise, or add words. "
-                "Write [illegible] for unreadable words. Output only the transcription."
+                "Transcribe this page completely and accurately, line by line. "
+                "Output all text exactly as written, including headers, student details, questions, answers, numbers, and bullet points. "
+                "Preserve spelling and punctuation. Do NOT summarize, omit, or add words. Output only the transcription."
             )
 
             client = ollama.Client(host=OLLAMA_HOST, timeout=VLM_TIMEOUT)

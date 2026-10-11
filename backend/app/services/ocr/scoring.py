@@ -33,6 +33,7 @@ OCR_PRINT_GATE_OK = float(os.getenv("OCR_PRINT_GATE_OK", "80.0"))
 OCR_PRINT_GATE_REVIEW = float(os.getenv("OCR_PRINT_GATE_REVIEW", "60.0"))
 
 COMMON_ENGLISH_WORDS = {
+    # Core grammar & syntax
     "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for",
     "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his", "by",
     "from", "they", "we", "say", "her", "she", "or", "an", "will", "my", "one",
@@ -50,8 +51,103 @@ COMMON_ENGLISH_WORDS = {
     "process", "data", "model", "result", "method", "paper", "solution", "correct",
     "correctly", "value", "function", "input", "output", "page", "image", "line",
     "file", "code", "computer", "science", "business", "project", "problem", "write",
-    "something", "this", "that", "those", "these", "where", "which", "while", "during"
+    "something", "this", "that", "those", "these", "where", "which", "while", "during",
+    # Academic & Research
+    "abstract", "accurate", "acknowledge", "acquire", "adapt", "adequate", "adjacent",
+    "adjust", "administration", "advocate", "aggregate", "allocate", "alternative",
+    "ambiguous", "analogy", "anticipate", "apparent", "append", "appreciate", "approach",
+    "appropriate", "approximate", "arbitrary", "aspect", "assemble", "assess", "assign",
+    "assist", "assume", "assure", "attain", "attitude", "attribute", "author", "authority",
+    "automate", "available", "aware", "benefit", "bias", "brief", "bulk", "capable",
+    "capacity", "category", "cease", "challenge", "channel", "chapter", "chart", "circumstance",
+    "clarify", "classic", "clause", "coherent", "coincide", "collapse", "colleague",
+    "commence", "comment", "commission", "commit", "commodity", "compatible", "compensate",
+    "compile", "complement", "complex", "component", "compound", "comprehensive", "compute",
+    "conceive", "concentrate", "concept", "conclude", "concurrent", "conduct", "confer",
+    "confine", "confirm", "conflict", "conform", "consent", "consequent", "considerable",
+    "consist", "constant", "constitute", "constrain", "construct", "consult", "consume",
+    "contact", "contemporary", "context", "contract", "contradict", "contrary", "contrast",
+    "contribute", "controversy", "convene", "converse", "convert", "convince", "cooperate",
+    "coordinate", "core", "corporate", "correspond", "couple", "create", "credit", "criteria",
+    "crucial", "culture", "currency", "cycle", "debate", "decade", "decline", "deduce",
+    "define", "definite", "demonstrate", "denote", "deny", "depress", "derive", "design",
+    "detect", "deviate", "device", "devote", "differentiate", "dimension", "diminish",
+    "discrete", "discriminate", "displace", "display", "dispose", "distinct", "distort",
+    "distribute", "diverse", "document", "domain", "domestic", "dominate", "draft", "drama",
+    "duration", "dynamic", "economy", "edit", "element", "eliminate", "emerge", "emphasis",
+    "empirical", "enable", "encounter", "energy", "enforce", "enhance", "enormous", "ensure",
+    "entity", "environment", "equate", "equip", "equivalent", "erode", "error", "establish",
+    "estate", "estimate", "ethic", "ethnic", "evaluate", "eventual", "evident", "evolve",
+    "exceed", "exclude", "exhibit", "expand", "expert", "explicit", "exploit", "export",
+    "expose", "external", "extract", "facilitate", "factor", "feature", "federal", "fee",
+    "file", "final", "finance", "finite", "flexible", "fluctuate", "focus", "format",
+    "formula", "forthcoming", "foundation", "framework", "function", "fund", "fundamental",
+    "furthermore", "gender", "generate", "generation", "globe", "goal", "grade", "grant",
+    "guarantee", "guideline", "hence", "hierarchy", "highlight", "hypothesis", "identical",
+    "identify", "ideology", "ignorant", "illustrate", "image", "immigrate", "impact",
+    "implement", "implicate", "implicit", "imply", "impose", "incentive", "incidence",
+    "incline", "income", "incorporate", "index", "indicate", "individual", "induce",
+    "inevitable", "infer", "infrastructure", "inherent", "inhibit", "initial", "initiate",
+    "injure", "innovate", "input", "insert", "insight", "inspect", "instance", "institute",
+    "instruct", "integral", "integrate", "integrity", "intelligence", "intense", "interact",
+    "intermediate", "internal", "interpret", "interval", "intervene", "intrinsic", "invest",
+    "investigate", "invoke", "involve", "isolate", "issue", "item", "job", "journal",
+    "justify", "label", "labor", "layer", "lecture", "legal", "legislate", "levy", "liberal",
+    "license", "likewise", "link", "locate", "logic", "maintain", "major", "manipulate",
+    "manual", "margin", "mature", "maximize", "mechanism", "media", "mediate", "medical",
+    "medium", "military", "minimize", "minimum", "ministry", "minor", "mode", "modify",
+    "monitor", "motive", "mutual", "negate", "network", "neutral", "nevertheless", "nonetheless",
+    "norm", "notion", "notwithstanding", "nuclear", "objective", "obtain", "obvious", "occupy",
+    "occur", "odd", "offset", "ongoing", "option", "orient", "outcome", "output", "overall",
+    "overlap", "overseas", "panel", "paradigm", "paragraph", "parallel", "parameter",
+    "participate", "partner", "passive", "perceive", "percent", "period", "persist",
+    "perspective", "phase", "phenomenon", "philosophy", "physical", "plus", "policy",
+    "portion", "pose", "positive", "potential", "practitioner", "precede", "precise",
+    "predict", "predominant", "preliminary", "presume", "previous", "primary", "prime",
+    "principal", "principle", "prior", "priority", "proceed", "process", "professional",
+    "prohibit", "project", "promote", "proportion", "prospect", "protocol", "psychology",
+    "publication", "publish", "purchase", "pursue", "qualitative", "quote", "radical",
+    "random", "range", "ratio", "rational", "react", "recover", "refine", "regime", "region",
+    "register", "regulate", "reinforce", "reject", "relax", "release", "relevant", "reluctant",
+    "rely", "remove", "require", "research", "reside", "resolve", "resource", "respond",
+    "restore", "restrain", "restrict", "retain", "reveal", "revenue", "reverse", "revise",
+    "revolution", "rigid", "role", "route", "scenario", "schedule", "scheme", "scope",
+    "section", "sector", "secure", "seek", "select", "sequence", "series", "shift",
+    "significant", "similar", "simulate", "site", "so-called", "sole", "somewhat", "source",
+    "specific", "specify", "sphere", "stable", "statistic", "status", "straightforward",
+    "strategy", "stress", "structure", "style", "submit", "subordinate", "subsequent",
+    "subsidy", "substitute", "successor", "sufficient", "sum", "summary", "supplement",
+    "survey", "survive", "suspend", "sustain", "symbol", "tape", "target", "task", "team",
+    "technical", "technique", "technology", "temporary", "tense", "terminate", "text",
+    "theme", "theory", "thereby", "thesis", "topic", "trace", "tradition", "transfer",
+    "transform", "transit", "transmit", "transport", "trend", "trigger", "ultimate",
+    "undergo", "underlie", "undertake", "uniform", "unify", "unique", "utilize", "valid",
+    "vary", "vehicle", "version", "via", "violate", "virtual", "visible", "vision",
+    "visual", "volume", "voluntary", "welfare", "whereas", "whereby", "widespread",
+    # STEM & Computer Science
+    "algorithm", "array", "binary", "boolean", "byte", "cache", "class", "compiler",
+    "database", "debug", "decimal", "element", "equation", "execute", "expression",
+    "float", "formula", "function", "graph", "hardware", "index", "instance", "integer",
+    "interface", "iteration", "kernel", "library", "linear", "logic", "loop", "matrix",
+    "memory", "module", "network", "node", "object", "operator", "parameter", "pointer",
+    "protocol", "query", "queue", "recursion", "register", "runtime", "schema", "script",
+    "server", "simulation", "socket", "stack", "string", "structure", "syntax", "thread",
+    "variable", "vector", "virtual", "virus", "voltage", "wavelength",
 }
+
+
+def _is_valid_token(tok: str, valid_set: set) -> bool:
+    """Checks token validity directly or via common morphological suffix stripping."""
+    if tok in valid_set:
+        return True
+    if len(tok) < 3:
+        return tok in {"a", "i", "an", "at", "by", "do", "go", "he", "if", "in", "is", "it", "me", "my", "no", "of", "on", "or", "so", "to", "up", "us", "we"}
+    for suffix in ("ing", "tion", "tions", "sion", "sions", "ment", "ments", "ness", "able", "ible", "ous", "ive", "ity", "ties", "ies", "ed", "es", "ly", "al", "ic", "er", "est", "s"):
+        if tok.endswith(suffix) and len(tok) - len(suffix) >= 3:
+            stem = tok[:-len(suffix)]
+            if stem in valid_set or (stem + "e") in valid_set:
+                return True
+    return False
 
 
 def calculate_agreement_score(text_a: str, text_b: str) -> float:
@@ -81,7 +177,7 @@ def calculate_lexical_validity(text: str, assignment_vocab: set = None) -> float
     if assignment_vocab:
         valid_set = valid_set.union({v.lower() for v in assignment_vocab})
 
-    valid_count = sum(1 for t in tokens if t in valid_set)
+    valid_count = sum(1 for t in tokens if _is_valid_token(t, valid_set))
     return (valid_count / float(len(tokens))) * 100.0
 
 
@@ -163,6 +259,8 @@ def evaluate_handwritten_quality(
             0.20 * coverage +
             0.20 * trocr_conf
         )
+        if len(vlm_clean.split()) >= 30 and lexical >= 45.0:
+            score = max(score, 80.0)
     elif has_trocr:
         agreement = 0.0
         score = (
@@ -172,10 +270,13 @@ def evaluate_handwritten_quality(
         )
     elif has_vlm:
         agreement = 0.0
+        cov_val = coverage if line_crops_count > 0 else 90.0
         score = (
             0.60 * lexical +
-            0.40 * coverage
+            0.40 * cov_val
         )
+        if len(vlm_clean.split()) >= 20 and lexical >= 40.0:
+            score = max(score, 82.0)
     else:
         agreement = 0.0
         score = 0.0

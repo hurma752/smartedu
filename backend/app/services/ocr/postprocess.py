@@ -13,23 +13,25 @@ import logging
 
 logger = logging.getLogger("smartedu.ocr.postprocess")
 
-HALLUCINATION_BLACKLIST = [
-    r"(?i)\bwhat links here\b",
-    r"(?i)\brelated changes\b",
-    r"(?i)\bupload file\b",
-    r"(?i)\bspecial pages\b",
-    r"(?i)\bpermanent link\b",
-    r"(?i)\bpage information\b",
-    r"(?i)\bcite this page\b",
-    r"(?i)\bwikidata item\b",
-    r"(?i)\bdisplaystyle\b",
-    r"(?i)\bdeutscher richard\b",
-    r"(?i)\bthe new zealand parliament\b",
-    r"(?i)\bthe new zealand government\b",
-    r"(?i)\bnot to be confused with\b",
-    r"(?i)\bamerican politician\b",
-    r"(?i)\bfrom wikipedia\b",
-    r"(?i)\bfree encyclopedia\b",
+def _squash(s: str) -> str:
+    return re.sub(r"[^a-z]", "", s.lower())
+
+
+SQUASHED_BLACKLIST = [
+    "whatlinkshere",
+    "relatedchanges",
+    "uploadfile",
+    "specialpages",
+    "permanentlink",
+    "pageinformation",
+    "citethispage",
+    "wikidataitem",
+    "displaystyle",
+    "personaltools",
+    "navigationmenu",
+    "fromwikipedia",
+    "freeencyclopedia",
+    "americanpolitician",
 ]
 
 WATERMARK_PATTERNS = [
@@ -51,10 +53,13 @@ def clean_line_text(line: str) -> str:
     text = line.strip()
 
     # Check hallucination blacklist
-    for pattern in HALLUCINATION_BLACKLIST:
-        if re.search(pattern, text):
-            logger.debug("Filtered hallucination line: %r", text)
-            return ""
+    if any(b in _squash(text) for b in SQUASHED_BLACKLIST):
+        return ""
+
+    text = re.sub(r"\S*\.0{2,}\S*", " ", text)            # 0.000, ft.000
+    text = re.sub(r"(?:[A-Za-z]\.){5,}", " ", text)       # S.S.S.S.S.
+    text = re.sub(r"(?<!\w)[#|~_]+(?!\w)", " ", text)     # stray # | ~
+    text = re.sub(r"(?:\s*\.{2,}\s*)+", " ", text)        # '...' from ruling remnants
 
     # Check scanner watermarks
     for pattern in WATERMARK_PATTERNS:
@@ -64,10 +69,10 @@ def clean_line_text(line: str) -> str:
     if re.search(r"0{4,}", text) or re.search(r"^[\d\.\s#\-_:\+=]{4,}$", text):
         return ""
 
-    # Filter lines with < 30% alphabetic characters (except short math or lists like "1. A)")
+    # Filter lines with purely non-alphanumeric noise (symbols, punctuation ruling remnants)
     if len(text) > 4:
-        alpha_count = sum(1 for c in text if c.isalpha())
-        if (alpha_count / float(len(text))) < 0.30:
+        alnum_count = sum(1 for c in text if c.isalnum())
+        if alnum_count < 2 or (alnum_count / float(len(text))) < 0.15:
             return ""
 
     # Normalize inner multiple spaces

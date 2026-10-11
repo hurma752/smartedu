@@ -35,8 +35,8 @@ logger = logging.getLogger("smartedu.ocr.router")
 OCR_SEMAPHORE = threading.Semaphore(1)
 
 # Env-configurable thresholds
-OCR_PRINT_PROBE_CONF = float(os.getenv("OCR_PRINT_PROBE_CONF", "85.0"))
-OCR_PRINT_PROBE_WORD_RATIO = float(os.getenv("OCR_PRINT_PROBE_WORD_RATIO", "0.90"))
+OCR_PRINT_PROBE_CONF = float(os.getenv("OCR_PRINT_PROBE_CONF", "70.0"))
+OCR_PRINT_PROBE_WORD_RATIO = float(os.getenv("OCR_PRINT_PROBE_WORD_RATIO", "0.65"))
 
 
 def _is_typed_text_page(page) -> bool:
@@ -179,15 +179,21 @@ def process_pdf_document(file_path: str, compare: bool = False) -> dict:
                     })
                     continue
 
-            # HANDWRITTEN Route: Ink isolation & line crops
+            # HANDWRITTEN Route:
+            # 1. First attempt VLM page transcription on flattened image (preserves headers, student details & complete layout)
+            vlm_res = {"text": "", "success": False}
+            if vlm_engine.is_available:
+                vlm_res = vlm_engine.process_page_image(flattened_img)
+
+            # 2. Line segmentation & TrOCR recognition (used if VLM unavailable, or if compare requested)
             clean_page_img, ink_mask = isolate_handwriting_ink(raw_img)
             line_crops = segment_page_lines(clean_page_img, ink_mask)
 
-            # 1. TrOCR line recognition
-            trocr_res = trocr_engine.process_page_lines(line_crops) if trocr_engine.is_available else {"text": "", "confidence": 0.0}
-
-            # 2. VLM exact page transcription
-            vlm_res = vlm_engine.process_page_image(clean_page_img) if vlm_engine.is_available else {"text": "", "success": False}
+            vlm_has_content = bool(vlm_res.get("success") and len(vlm_res.get("text", "").strip()) >= 30)
+            if vlm_has_content and not compare:
+                trocr_res = {"text": "", "confidence": 0.0}
+            else:
+                trocr_res = trocr_engine.process_page_lines(line_crops) if trocr_engine.is_available else {"text": "", "confidence": 0.0}
 
             # Evaluate composite quality score
             hw_eval = evaluate_handwritten_quality(
@@ -197,11 +203,16 @@ def process_pdf_document(file_path: str, compare: bool = False) -> dict:
                 line_crops_count=len(line_crops),
             )
 
-            clean_hw_text = clean_academic_text(hw_eval["primary_text"])
+            primary_text = hw_eval["primary_text"]
+            # Fallback guard: if handwritten pipeline returned very little text but Tesseract got something, incorporate it
+            if len(primary_text.strip()) < 20 and len(tess_text.strip()) >= 20:
+                primary_text = tess_text
+
+            clean_hw_text = clean_academic_text(primary_text)
             page_texts.append(clean_hw_text)
             page_scores.append(hw_eval["composite_score"])
 
-            engine_tag = "vlm+trocr" if (vlm_res.get("success") and trocr_res.get("text")) else ("vlm" if vlm_res.get("success") else "trocr")
+            engine_tag = "vlm+trocr" if (vlm_res.get("success") and trocr_res.get("text")) else ("vlm" if vlm_res.get("success") else ("trocr" if trocr_res.get("text") else "tesseract"))
             engines_used.add(engine_tag)
 
             page_details.append({

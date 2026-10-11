@@ -67,15 +67,7 @@ def isolate_handwriting_ink(pil_image: Image.Image) -> tuple[Image.Image, np.nda
     # Binarize for ink mask
     _, binary = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    # 1. Crop top header if date grid is detected in the top 15% of the page
-    top_region_h = int(h * 0.15)
-    header_crop_y = 0
-    top_crop = binary[:top_region_h, :]
-    # Look for dense horizontal/vertical cluster typical of date boxes
-    if top_crop.size > 0 and np.mean(top_crop) > 30:
-        header_crop_y = top_region_h
-
-    # 2. Morphological ruled-line removal
+    # 1. Morphological ruled-line removal
     # Detect horizontal lines wider than 35 pixels
     horiz_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 1))
     detected_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horiz_kernel)
@@ -86,12 +78,13 @@ def isolate_handwriting_ink(pil_image: Image.Image) -> tuple[Image.Image, np.nda
     # Inpaint small gaps left by removed ruling lines
     ink_mask = cv2.dilate(ink_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 2)), iterations=1)
 
+    # Note: date/watermark filtering is handled safely in postprocessing
+    # to avoid blindly wiping out student names, roll numbers, or headers.
+
     # 3. Clean left/right margins and binding-hole blobs
-    margin_w = int(w * 0.04)
+    margin_w = int(w * 0.01)                         # edge islands are now trimmed in lines.py
     ink_mask[:, :margin_w] = 0
     ink_mask[:, w - margin_w:] = 0
-    if header_crop_y > 0:
-        ink_mask[:header_crop_y, :] = 0
 
     # Clean isolated small blob noise (binding holes)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(ink_mask)

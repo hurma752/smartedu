@@ -10,6 +10,7 @@ Uses HuggingFace VisionEncoderDecoderModel with beam search generation:
 """
 
 import os
+import re
 import math
 import logging
 from PIL import Image
@@ -19,7 +20,7 @@ logger = logging.getLogger("smartedu.ocr.trocr")
 
 TROCR_MODEL_NAME = os.getenv("TROCR_MODEL", "microsoft/trocr-large-handwritten")
 TROCR_FALLBACK_MODEL = "microsoft/trocr-base-handwritten"
-TROCR_LINE_MIN_CONF = float(os.getenv("TROCR_LINE_MIN_CONF", "35.0"))
+TROCR_LINE_MIN_CONF = float(os.getenv("TROCR_LINE_MIN_CONF", "10.0"))
 
 
 class TrOCREngine:
@@ -78,7 +79,7 @@ class TrOCREngine:
                 out = self._model.generate(
                     pixel_values,
                     num_beams=4,
-                    max_new_tokens=64,
+                    max_new_tokens=128,
                     early_stopping=True,
                     output_scores=True,
                     return_dict_in_generate=True,
@@ -94,9 +95,13 @@ class TrOCREngine:
                 conf = math.exp(log_prob) * 100.0
                 conf = min(100.0, max(0.0, conf))
 
-            # Drop lines below TROCR_LINE_MIN_CONF threshold
-            if conf < TROCR_LINE_MIN_CONF:
-                logger.debug("Dropped TrOCR line with low beam conf (%.1f%% < %.1f%%): %r", conf, TROCR_LINE_MIN_CONF, raw_text)
+            # Only drop if empty or pure punctuation noise; preserve all valid student text
+            has_alphanumeric = bool(re.search(r"[a-zA-Z0-9]", raw_text))
+            if not has_alphanumeric:
+                return "", conf
+
+            if conf < TROCR_LINE_MIN_CONF and len(raw_text.strip()) <= 2:
+                logger.debug("Dropped short TrOCR noise with low beam conf (%.1f%% < %.1f%%): %r", conf, TROCR_LINE_MIN_CONF, raw_text)
                 return "", conf
 
             return raw_text, conf
