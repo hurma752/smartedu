@@ -103,6 +103,70 @@ class VLMEngine:
             self._check_availability()
         return self._available is True
 
+    def _transcribe(self, img: Image.Image, prompt: str, max_dim: int) -> str:
+        W, H = img.size
+        if max(W, H) > max_dim:
+            scale = max_dim / float(max(W, H))
+            img = img.resize((int(W * scale), int(H * scale)), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="PNG")
+        client = ollama.Client(host=OLLAMA_HOST, timeout=VLM_TIMEOUT)
+        kwargs = dict(
+            model=OCR_VLM_MODEL,
+            prompt=prompt,
+            images=[buf.getvalue()],
+            keep_alive="5m",
+            options={
+                "temperature": 0.0,
+                "num_ctx": 8192,
+                "num_predict": 2048,
+                "repeat_penalty": 1.05,
+            },
+        )
+        try:
+            response = client.generate(think=False, **kwargs)
+        except TypeError:
+            response = client.generate(**kwargs)
+        raw = (response.get("response", "") or "").strip()
+        raw = re.sub(r"(?s)<think>.*?</think>", "", raw).strip()
+        raw = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", raw).strip()
+        lines = raw.split("\n")
+        if lines and any(p in lines[0].lower() for p in ["transcription", "here is", "transcribed", "text:"]):
+            raw = "\n".join(lines[1:]).strip()
+        return raw
+
+    def process_page_strips(self, page_image: Image.Image, cuts: list[int], x_range: tuple[int, int] | None = None) -> dict:
+        """
+        Transcribes the page in horizontal strips (cut at blank inter-line rows)
+        so handwriting reaches the VLM at much higher effective resolution.
+        """
+        if not self.is_available:
+            return {"text": "", "success": False, "engine": "vlm"}
+        W, H = page_image.size
+        x1, x2 = x_range if x_range else (0, W)
+        prompt = (
+            "This image is a horizontal strip of a handwritten student assignment page. "
+            "Transcribe every line of handwriting exactly as written, top to bottom, one output line per written line. "
+            "Include headings, names, numbers, symbols and punctuation. Keep the student's spelling. "
+            "Do not summarize, translate, correct, explain, or add anything. If a word is unclear, give your best reading. "
+            "Output only the transcribed text."
+        )
+        parts = []
+        try:
+            for top, bot in zip(cuts[:-1], cuts[1:]):
+                if bot - top < 20:
+                    continue
+                strip = page_image.crop((x1, top, x2, bot))
+                txt = self._transcribe(strip, prompt, max_dim=1792)
+                if txt:
+                    parts.append(txt)
+            text = "\n".join(parts).strip()
+            logger.info("VLM strip transcription complete (%d strips, %d chars).", len(cuts) - 1, len(text))
+            return {"text": text, "success": bool(text), "engine": "vlm"}
+        except Exception as exc:
+            logger.warning("VLM strip transcription failed: %s. Falling back to full page.", exc)
+            return self.process_page_image(page_image)
+
     def process_page_image(self, page_image: Image.Image) -> dict:
         """
         Sends cleaned page image to Ollama VLM for exact transcription.
@@ -118,46 +182,12 @@ class VLMEngine:
             return {"text": "", "success": False, "engine": "vlm"}
 
         try:
-            # Resize image to cap max dimension at ~1600px for optimal VLM tokenization
-            W, H = page_image.size
-            max_dim = 1600
-            if max(W, H) > max_dim:
-                scale = max_dim / float(max(W, H))
-                new_size = (int(W * scale), int(H * scale))
-                img_to_send = page_image.resize(new_size, Image.Resampling.LANCZOS)
-            else:
-                img_to_send = page_image
-
-            # Convert image to PNG bytes
-            img_buffer = io.BytesIO()
-            img_to_send.save(img_buffer, format="PNG")
-            img_bytes = img_buffer.getvalue()
-
             prompt = (
                 "Transcribe this page completely and accurately, line by line. "
                 "Output all text exactly as written, including headers, student details, questions, answers, numbers, and bullet points. "
                 "Preserve spelling and punctuation. Do NOT summarize, omit, or add words. Output only the transcription."
             )
-
-            client = ollama.Client(host=OLLAMA_HOST, timeout=VLM_TIMEOUT)
-            response = client.generate(
-                model=OCR_VLM_MODEL,
-                prompt=prompt,
-                images=[img_bytes],
-                options={
-                    "temperature": 0.0,
-                    "num_ctx": 8192,
-                    "keep_alive": "5m",
-                }
-            )
-
-            raw_response = response.get("response", "").strip()
-
-            # Strip common model preambles like "Here is the transcription:"
-            cleaned = raw_response
-            lines = cleaned.split("\n")
-            if lines and any(p in lines[0].lower() for p in ["transcription", "here is", "transcribed", "text:"]):
-                cleaned = "\n".join(lines[1:]).strip()
+            cleaned = self._transcribe(page_image, prompt, max_dim=1600)
 
             logger.info("VLM transcription complete (%d characters).", len(cleaned))
             return {

@@ -45,6 +45,7 @@ from typing import Optional, List, Dict, Any
 
 import numpy as np
 from sqlalchemy.orm import Session
+from app.config import settings
 
 from app.models.models import (
     User, Enrollment, Assignment, Submission, FinalGrade, Rubric,
@@ -377,10 +378,12 @@ def _point_in_time_risk(timeline: dict, as_of: date) -> Optional[dict]:
     )
 
     att = [r for r in timeline["attendance"] if r["date"] and r["date"] <= as_of]
-    attendance_rate = (
-        sum(1 for r in att if r["status"] in ("present", "late")) / len(att)
-        if att else None
-    )
+    if att:
+        present_count = sum(1 for r in att if r["status"] == "present")
+        late_count = sum(1 for r in att if r["status"] == "late")
+        attendance_rate = (present_count + (late_count * settings.LATE_ATTENDANCE_WEIGHT)) / len(att)
+    else:
+        attendance_rate = None
 
     values = {
         "score": avg_score, "attendance": attendance_rate,
@@ -423,7 +426,8 @@ def _build_period(timeline: dict, start: date, end: date, granularity: str,
     present = sum(1 for r in att if r["status"] == "present")
     late_att = sum(1 for r in att if r["status"] == "late")
     absent = sum(1 for r in att if r["status"] == "absent")
-    attendance_pct = ((present + late_att) / len(att) * 100.0) if att else None
+    weighted_present = present + (late_att * settings.LATE_ATTENDANCE_WEIGHT)
+    attendance_pct = (weighted_present / len(att) * 100.0) if att else None
 
     # ── Assignment activity in window ──
     # "Due in this period" drives completion; "graded in this period" drives
@@ -500,7 +504,7 @@ def _build_period(timeline: dict, start: date, end: date, granularity: str,
         "components_present": present_components,
         "attendance": {
             "sessions": len(att), "present": present, "late": late_att, "absent": absent,
-            "attended": present + late_att,
+            "weighted_present": round(weighted_present, 2),
             "rate_pct": round(attendance_pct, 1) if attendance_pct is not None else None,
         },
         "assignments": {
@@ -532,7 +536,7 @@ def _empty_period(start, end, granularity, short, long_label, today) -> dict:
         "has_data": False, "is_current": start <= today <= end, "is_complete": end < today,
         "components_present": [],
         "attendance": {"sessions": 0, "present": 0, "late": 0, "absent": 0,
-                       "attended": 0, "rate_pct": None},
+                       "weighted_present": 0.0, "rate_pct": None},
         "assignments": {"due": 0, "submitted": 0, "completed": 0, "missing": 0,
                         "late": 0, "graded": 0, "completion_pct": None, "avg_score_pct": None},
         "engagement": {"chat_messages": 0, "material_downloads": 0,
@@ -619,9 +623,12 @@ def _overall_dimensions(timeline: dict, periods: List[dict], granularity: str) -
     academic = round(float(np.mean(scored)), 1) if scored else None
 
     att = timeline["attendance"]
-    attendance = round(
-        sum(1 for r in att if r["status"] in ("present", "late")) / len(att) * 100.0, 1
-    ) if att else None
+    if att:
+        present = sum(1 for r in att if r["status"] == "present")
+        late = sum(1 for r in att if r["status"] == "late")
+        attendance = round((present + (late * settings.LATE_ATTENDANCE_WEIGHT)) / len(att) * 100.0, 1)
+    else:
+        attendance = None
 
     submission = round(
         sum(1 for a in concluded if a["outcome"] != "missing") / len(concluded) * 100.0, 1
@@ -670,10 +677,13 @@ def _build_insights(dimensions, trends, periods, timeline, granularity,
     # ── Attendance ────────────────────────────────────────────────────────
     att = by_key["attendance"]
     if att["has_data"]:
+        late_count = sum(1 for r in timeline["attendance"] if r["status"] == "late")
+        late_pct_int = int(round(settings.LATE_ATTENDANCE_WEIGHT * 100))
+        late_note = f" ({late_count} marked late with {late_pct_int}% credit)" if late_count > 0 else ""
         if att["score"] < ATTENDANCE_CRITICAL_PCT:
             out.append(_insight(
                 "critical", "attendance", "Attendance is critically low",
-                f"{you} attended {att['score']:.0f}% of classes so far.",
+                f"{you} attended {att['score']:.0f}% of classes so far{late_note}.",
                 "Attend every remaining session — missed classes are the single strongest predictor of falling behind."
                 if audience == "student" else
                 "Schedule a one-to-one; check for a practical barrier (timetable clash, travel, health) before treating this as disengagement.",
@@ -681,7 +691,7 @@ def _build_insights(dimensions, trends, periods, timeline, granularity,
         elif att["score"] < ATTENDANCE_CONCERN_PCT:
             out.append(_insight(
                 "warning", "attendance", "Attendance is slipping",
-                f"{you} attended {att['score']:.0f}% of classes — below the {ATTENDANCE_CONCERN_PCT:.0f}% comfort line.",
+                f"{you} attended {att['score']:.0f}% of classes{late_note} — below the {ATTENDANCE_CONCERN_PCT:.0f}% comfort line.",
                 f"Aim to attend every class for the next few {period_word}s to pull this back up."
                 if audience == "student" else
                 "Worth a check-in before it turns into missed assessments.",
@@ -689,7 +699,7 @@ def _build_insights(dimensions, trends, periods, timeline, granularity,
         elif att["score"] >= 90:
             out.append(_insight(
                 "positive", "attendance", "Excellent attendance",
-                f"{you} attended {att['score']:.0f}% of classes.",
+                f"{you} attended {att['score']:.0f}% of classes{late_note}.",
                 None,
             ))
 
@@ -926,6 +936,10 @@ def get_student_progress(student_id: int, course_id: int, db: Session,
             "periods_with_data": len(scored_periods),
             "total_assignments": len(timeline["assignments"]),
             "sessions_marked": len(timeline["attendance"]),
+            "attendance_present": sum(1 for r in timeline["attendance"] if r["status"] == "present"),
+            "attendance_late": sum(1 for r in timeline["attendance"] if r["status"] == "late"),
+            "attendance_absent": sum(1 for r in timeline["attendance"] if r["status"] == "absent"),
+            "attendance_rate": next((d["score"] for d in dimensions if d["key"] == "attendance" and d["has_data"]), None),
         },
         "risk": {
             "current_level": (replayed_now or {}).get("level"),
@@ -946,6 +960,7 @@ def get_student_progress(student_id: int, course_id: int, db: Session,
             "primary_series": primary_key,
             "trailing_period_partial": trailing_partial,
             "weights": COMPONENT_WEIGHTS,
+            "late_attendance_weight": settings.LATE_ATTENDANCE_WEIGHT,
             "engagement_target": _ENGAGEMENT_TARGET[granularity],
             "scoring_note": (
                 "Overall score is a weighted mean of the dimensions that have data in "
@@ -1032,6 +1047,8 @@ def get_course_progress_overview(course_id: int, db: Session,
             concern_detail = warn_insights[0]["detail"]
             recommended_action = warn_insights[0].get("recommended_action")
 
+        s_att_periods = [bucket["attendance"] for bucket in p["periods"]]
+
         student_summaries.append({
             "student_id": student.id,
             "student_name": student.full_name,
@@ -1041,6 +1058,9 @@ def get_course_progress_overview(course_id: int, db: Session,
             "previous_score": p["summary"]["previous_score"],
             "score_delta": p["summary"]["delta"],
             "attendance_rate": dims["attendance"]["score"] if dims["attendance"]["has_data"] else None,
+            "attendance_present": p["summary"].get("attendance_present", 0),
+            "attendance_late": p["summary"].get("attendance_late", 0),
+            "attendance_absent": p["summary"].get("attendance_absent", 0),
             "submission_rate": dims["submission"]["score"] if dims["submission"]["has_data"] else None,
             "academic_rate": dims["academic"]["score"] if dims["academic"]["has_data"] else None,
             "engagement_rate": dims["engagement"]["score"] if dims["engagement"]["has_data"] else None,
@@ -1057,6 +1077,7 @@ def get_course_progress_overview(course_id: int, db: Session,
             "recommended_action": recommended_action,
             "urgency": urgency,
             "series": p["series"],
+            "attendance_periods": s_att_periods,
         })
 
     # Interventions shortlist: students with high/medium urgency or critical insights
@@ -1078,6 +1099,9 @@ def get_course_progress_overview(course_id: int, db: Session,
         period_scores = []
         period_attendances = []
         period_completions = []
+        period_present = 0
+        period_late = 0
+        period_absent = 0
         active_count = 0
 
         for s in student_summaries:
@@ -1093,6 +1117,12 @@ def get_course_progress_overview(course_id: int, db: Session,
             if comp_val is not None:
                 period_completions.append(comp_val)
 
+            if i < len(s.get("attendance_periods", [])):
+                p_att = s["attendance_periods"][i]
+                period_present += p_att.get("present", 0)
+                period_late += p_att.get("late", 0)
+                period_absent += p_att.get("absent", 0)
+
         cohort_trajectory.append({
             "key": start.isoformat(),
             "label": short,
@@ -1105,11 +1135,18 @@ def get_course_progress_overview(course_id: int, db: Session,
             "average_score": round(float(np.mean(period_scores)), 1) if period_scores else None,
             "average_attendance": round(float(np.mean(period_attendances)), 1) if period_attendances else None,
             "average_completion": round(float(np.mean(period_completions)), 1) if period_completions else None,
+            "present_count": period_present,
+            "late_count": period_late,
+            "absent_count": period_absent,
         })
 
     # Class-wide totals
     all_scores = [s["current_score"] for s in student_summaries if s["current_score"] is not None]
     avg_score = round(float(np.mean(all_scores)), 1) if all_scores else None
+
+    total_present = sum(s.get("attendance_present", 0) for s in student_summaries)
+    total_late = sum(s.get("attendance_late", 0) for s in student_summaries)
+    total_absent = sum(s.get("attendance_absent", 0) for s in student_summaries)
 
     risk_counts = {"high": 0, "medium": 0, "low": 0}
     for s in student_summaries:
@@ -1139,4 +1176,8 @@ def get_course_progress_overview(course_id: int, db: Session,
         "cohort_trajectory": cohort_trajectory,
         "interventions": interventions,
         "students": student_summaries,
+        "total_present": total_present,
+        "total_late": total_late,
+        "total_absent": total_absent,
+        "late_attendance_weight": settings.LATE_ATTENDANCE_WEIGHT,
     }

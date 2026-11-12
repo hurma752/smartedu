@@ -20,6 +20,7 @@ class Settings:
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "SmartEdu")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    LATE_ATTENDANCE_WEIGHT: float = float(os.getenv("LATE_ATTENDANCE_WEIGHT", "0.5"))
 
 
 settings = Settings()

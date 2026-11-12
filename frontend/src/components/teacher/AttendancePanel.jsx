@@ -14,6 +14,8 @@ const STATUS_OPTIONS = [
 
 export default function AttendancePanel({ courseId }) {
   const [sessions, setSessions]       = useState([]);
+  const [summary, setSummary]         = useState([]);
+  const [showRosterSummary, setShowRosterSummary] = useState(false);
   const [roster, setRoster]           = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [marks, setMarks]             = useState({}); // { studentId: status }
@@ -24,8 +26,12 @@ export default function AttendancePanel({ courseId }) {
 
   const loadSessions = useCallback(async () => {
     try {
-      const { data } = await attendanceApi.listSessions(courseId);
-      setSessions(data);
+      const [sessRes, sumRes] = await Promise.all([
+        attendanceApi.listSessions(courseId),
+        attendanceApi.getAttendanceSummary(courseId).catch(() => ({ data: [] })),
+      ]);
+      setSessions(sessRes.data);
+      if (sumRes?.data) setSummary(sumRes.data);
     } catch (err) {
       setError(getErrorMessage(err, "Couldn't load sessions."));
     }
@@ -151,14 +157,107 @@ export default function AttendancePanel({ courseId }) {
     );
   }
 
+  const totalPresent = summary.reduce((acc, s) => acc + (s.present_count || 0), 0);
+  const totalLate = summary.reduce((acc, s) => acc + (s.late_count || 0), 0);
+  const totalAbsent = summary.reduce((acc, s) => acc + (s.absent_count || 0), 0);
+  const totalMarked = totalPresent + totalLate + totalAbsent;
+  const avgAttendance = summary.length && totalMarked > 0
+    ? Math.round(
+        summary.reduce((acc, s) => acc + ((s.attendance_rate || 0) * 100), 0) /
+        (summary.filter(s => s.attendance_rate !== null).length || 1)
+      )
+    : null;
+
   return (
-    <Card>
-      <CardHeader
-        title="Class sessions"
-        count={sessions.length}
-        action={<Btn size="sm" onClick={() => setShowForm(!showForm)}>{showForm ? "Cancel" : "+ New session"}</Btn>}
-      />
-      <Alert variant="error">{error}</Alert>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* ── Attendance Analytics Summary Cards ── */}
+      {sessions.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+          <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderTop: `3px solid #0284C7`, borderRadius: "10px", padding: "14px 16px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: C.textMuted }}>Overall Attendance</span>
+            <p style={{ fontSize: "22px", fontWeight: "800", color: C.textPrimary, margin: "4px 0 0" }}>
+              {avgAttendance !== null ? `${avgAttendance}%` : "—"}
+            </p>
+            <span style={{ fontSize: "11.5px", color: C.textMuted }}>Weighted presence rate</span>
+          </div>
+
+          <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderTop: `3px solid #059669`, borderRadius: "10px", padding: "14px 16px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: C.textMuted }}>Present</span>
+            <p style={{ fontSize: "22px", fontWeight: "800", color: "#059669", margin: "4px 0 0" }}>
+              {totalPresent}
+            </p>
+            <span style={{ fontSize: "11.5px", color: C.textMuted }}>100% full credit</span>
+          </div>
+
+          <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderTop: `3px solid #D97706`, borderRadius: "10px", padding: "14px 16px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: C.textMuted }}>Late</span>
+            <p style={{ fontSize: "22px", fontWeight: "800", color: "#D97706", margin: "4px 0 0" }}>
+              {totalLate}
+            </p>
+            <span style={{ fontSize: "11.5px", color: C.textMuted }}>50% weighted credit</span>
+          </div>
+
+          <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderTop: `3px solid #DC2626`, borderRadius: "10px", padding: "14px 16px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: C.textMuted }}>Absent</span>
+            <p style={{ fontSize: "22px", fontWeight: "800", color: "#DC2626", margin: "4px 0 0" }}>
+              {totalAbsent}
+            </p>
+            <span style={{ fontSize: "11.5px", color: C.textMuted }}>0% credit</span>
+          </div>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader
+          title="Class sessions"
+          count={sessions.length}
+          action={
+            <div style={{ display: "flex", gap: "8px" }}>
+              {summary.length > 0 && (
+                <Btn variant="secondary" size="sm" onClick={() => setShowRosterSummary(!showRosterSummary)}>
+                  {showRosterSummary ? "Hide Student Breakdown" : "View Student Breakdown"}
+                </Btn>
+              )}
+              <Btn size="sm" onClick={() => setShowForm(!showForm)}>{showForm ? "Cancel" : "+ New session"}</Btn>
+            </div>
+          }
+        />
+        <Alert variant="error">{error}</Alert>
+
+        {showRosterSummary && (
+          <div style={{ borderBottom: `1px solid ${C.border}`, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <thead>
+                <tr style={{ background: C.subtleBg, borderBottom: `1px solid ${C.border}`, color: C.textMuted, fontSize: "11px", textTransform: "uppercase", fontWeight: "700" }}>
+                  <th style={{ padding: "10px 16px", textAlign: "left" }}>Student</th>
+                  <th style={{ padding: "10px 16px", textAlign: "center" }}>Present</th>
+                  <th style={{ padding: "10px 16px", textAlign: "center" }}>Late (0.5x)</th>
+                  <th style={{ padding: "10px 16px", textAlign: "center" }}>Absent</th>
+                  <th style={{ padding: "10px 16px", textAlign: "right" }}>Attendance %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.map((st) => (
+                  <tr key={st.student_id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "10px 16px", fontWeight: "600", color: C.textPrimary }}>{st.student_name}</td>
+                    <td style={{ padding: "10px 16px", textAlign: "center", color: "#059669", fontWeight: "600" }}>{st.present_count}</td>
+                    <td style={{ padding: "10px 16px", textAlign: "center", color: "#D97706", fontWeight: "600" }}>{st.late_count}</td>
+                    <td style={{ padding: "10px 16px", textAlign: "center", color: "#DC2626", fontWeight: "600" }}>{st.absent_count}</td>
+                    <td style={{ padding: "10px 16px", textAlign: "right", fontWeight: "700" }}>
+                      {st.attendance_rate !== null ? (
+                        <span style={{ color: st.attendance_rate >= 0.75 ? "#059669" : st.attendance_rate >= 0.6 ? "#D97706" : "#DC2626" }}>
+                          {Math.round(st.attendance_rate * 100)}%
+                        </span>
+                      ) : (
+                        <span style={{ color: C.textMuted }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
       {showForm && (
         <form onSubmit={handleCreateSession} style={{ padding: "16px 18px", borderBottom: `1px solid ${C.border}`, background: C.subtleBg }}>
@@ -219,5 +318,6 @@ export default function AttendancePanel({ courseId }) {
         )}
       </div>
     </Card>
+  </div>
   );
 }

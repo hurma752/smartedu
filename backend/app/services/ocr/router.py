@@ -37,6 +37,33 @@ OCR_SEMAPHORE = threading.Semaphore(1)
 # Env-configurable thresholds
 OCR_PRINT_PROBE_CONF = float(os.getenv("OCR_PRINT_PROBE_CONF", "70.0"))
 OCR_PRINT_PROBE_WORD_RATIO = float(os.getenv("OCR_PRINT_PROBE_WORD_RATIO", "0.65"))
+OCR_VLM_STRIP_HEIGHT = int(os.getenv("OCR_VLM_STRIP_HEIGHT", "900"))  # px at 300 dpi; 0 disables strips
+
+
+def _compute_strip_cuts(ink_mask: np.ndarray, target_h: int) -> tuple[list[int], tuple[int, int] | None]:
+    """Choose horizontal cut rows at the emptiest inter-line gaps near every target_h pixels."""
+    H, W = ink_mask.shape[:2]
+    rows = (ink_mask > 0).sum(1).astype(np.float32)
+    ink_rows = np.where(rows > 0)[0]
+    cols = np.where((ink_mask > 0).sum(0) > 0)[0]
+    if len(ink_rows) == 0 or target_h <= 0:
+        return [0, H], None
+    top = max(0, int(ink_rows[0]) - 40)
+    bot = min(H, int(ink_rows[-1]) + 40)
+    x_range = (max(0, int(cols[0]) - 40), min(W, int(cols[-1]) + 40)) if len(cols) else None
+    smooth = np.convolve(rows, np.ones(15, dtype=np.float32) / 15, mode="same")
+    cuts = [top]
+    while bot - cuts[-1] > target_h * 1.3:
+        tgt = cuts[-1] + target_h
+        lo, hi = int(tgt - target_h * 0.3), int(min(bot, tgt + target_h * 0.3))
+        win = smooth[lo:hi]
+        is_min = win <= win.min() + 1e-3
+        runs = np.split(np.arange(len(win)), np.where(np.diff(is_min.astype(np.int8)) != 0)[0] + 1)
+        runs = [r for r in runs if is_min[r[0]]]
+        best = min(runs, key=lambda r: (-len(r), abs(lo + r.mean() - tgt)))
+        cuts.append(lo + int(best.mean()))
+    cuts.append(bot)
+    return cuts, x_range
 
 
 def _is_typed_text_page(page) -> bool:
@@ -181,12 +208,16 @@ def process_pdf_document(file_path: str, compare: bool = False) -> dict:
 
             # HANDWRITTEN Route:
             # 1. First attempt VLM page transcription on flattened image (preserves headers, student details & complete layout)
+            clean_page_img, ink_mask = isolate_handwriting_ink(raw_img)
             vlm_res = {"text": "", "success": False}
             if vlm_engine.is_available:
-                vlm_res = vlm_engine.process_page_image(flattened_img)
+                if OCR_VLM_STRIP_HEIGHT > 0 and ink_mask is not None and ink_mask.size and ink_mask.shape[:2] == (flattened_img.size[1], flattened_img.size[0]):
+                    cuts, x_range = _compute_strip_cuts(ink_mask, OCR_VLM_STRIP_HEIGHT)
+                    vlm_res = vlm_engine.process_page_strips(flattened_img, cuts, x_range)
+                else:
+                    vlm_res = vlm_engine.process_page_image(flattened_img)
 
             # 2. Line segmentation & TrOCR recognition (used if VLM unavailable, or if compare requested)
-            clean_page_img, ink_mask = isolate_handwriting_ink(raw_img)
             line_crops = segment_page_lines(clean_page_img, ink_mask)
 
             vlm_has_content = bool(vlm_res.get("success") and len(vlm_res.get("text", "").strip()) >= 30)

@@ -200,6 +200,30 @@ export default function StudentProgressPanel({ courseId }) {
           }
         />
 
+        {/* Attendance Category Legend & Summary Bar when viewing Attendance */}
+        {activeSeries === "attendance" && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", padding: "10px 18px", background: C.subtleBg, borderBottom: `1px solid ${C.border}`, fontSize: "12px" }}>
+            <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontWeight: "700", color: C.textPrimary }}>Categories:</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#10B981", fontWeight: "600" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#10B981" }} /> Present (100% credit)
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#F59E0B", fontWeight: "600" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#F59E0B" }} /> Late (50% weight)
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#EF4444", fontWeight: "600" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#EF4444" }} /> Absent (0% credit)
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: "8px", color: C.textSecondary, fontWeight: "600", flexWrap: "wrap" }}>
+              <span>Total: {summary.sessions_marked ?? 0}</span> ·
+              <span style={{ color: "#10B981" }}>{summary.attendance_present ?? 0} Present</span> ·
+              <span style={{ color: "#F59E0B" }}>{summary.attendance_late ?? 0} Late</span> ·
+              <span style={{ color: "#EF4444" }}>{summary.attendance_absent ?? 0} Absent</span>
+            </div>
+          </div>
+        )}
+
         <div style={{ padding: "20px 18px 10px" }}>
           <SvgTrendChart
             periods={periods}
@@ -224,9 +248,18 @@ export default function StudentProgressPanel({ courseId }) {
                     <i className={`ti ${dim.icon}`} style={{ color: C.accent, fontSize: "15px" }} />
                     {dim.label}
                   </span>
-                  <span style={{ fontSize: "13px", fontWeight: "700", color: dim.has_data ? C.textPrimary : C.textMuted }}>
-                    {dim.has_data ? `${Math.round(dim.score)}%` : "No data yet"}
-                  </span>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: "13px", fontWeight: "700", color: dim.has_data ? C.textPrimary : C.textMuted }}>
+                      {dim.has_data ? `${Math.round(dim.score)}%` : "No data yet"}
+                    </span>
+                    {dim.key === "attendance" && dim.has_data && (
+                      <div style={{ fontSize: "11px", color: C.textMuted, marginTop: "1px" }}>
+                        <span style={{ color: "#10B981", fontWeight: "600" }}>{summary.attendance_present ?? 0}P</span> · {" "}
+                        <span style={{ color: "#F59E0B", fontWeight: "600" }}>{summary.attendance_late ?? 0}L</span> · {" "}
+                        <span style={{ color: "#EF4444", fontWeight: "600" }}>{summary.attendance_absent ?? 0}A</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div style={{ height: "7px", background: C.subtleBg, borderRadius: "5px", overflow: "hidden", border: `1px solid ${C.border}` }}>
                   <div
@@ -418,6 +451,9 @@ function SvgTrendChart({ periods, seriesData, seriesKey, hoveredIndex, onHover }
     );
   }
 
+  const isAttendance = seriesKey === "attendance";
+  const lineColor = isAttendance ? "#0EA5E9" : C.accent;
+
   const getX = (index) => {
     if (periods.length <= 1) return padding.left + plotWidth / 2;
     return padding.left + (index / (periods.length - 1)) * plotWidth;
@@ -449,8 +485,8 @@ function SvgTrendChart({ periods, seriesData, seriesKey, hoveredIndex, onHover }
       >
         <defs>
           <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={C.accent} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={C.accent} stopOpacity="0.0" />
+            <stop offset="0%" stopColor={lineColor} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={lineColor} stopOpacity="0.0" />
           </linearGradient>
         </defs>
 
@@ -482,13 +518,81 @@ function SvgTrendChart({ periods, seriesData, seriesKey, hoveredIndex, onHover }
           );
         })}
 
+        {/* Attendance Stacked Category Bars (Present = Green, Late = Amber, Absent = Red) */}
+        {isAttendance && points.map((p, i) => {
+          const att = p.period?.attendance;
+          if (!att || att.sessions === 0) return null;
+          const total = att.sessions || (att.present + att.late + att.absent);
+          if (total === 0) return null;
+
+          const cx = getX(i);
+          const barW = Math.max(8, Math.min(22, plotWidth / (points.length * 2.5)));
+          const barX = cx - barW / 2;
+          const isHov = hoveredIndex === i;
+
+          const presentFrac = att.present / total;
+          const lateFrac = att.late / total;
+          const absentFrac = att.absent / total;
+
+          const maxBarH = plotHeight;
+          const presentH = presentFrac * maxBarH;
+          const lateH = lateFrac * maxBarH;
+          const absentH = absentFrac * maxBarH;
+
+          const baseY = padding.top + plotHeight;
+          const absentY = baseY - absentH;
+          const lateY = absentY - lateH;
+          const presentY = lateY - presentH;
+
+          return (
+            <g key={`bar_${i}`} style={{ pointerEvents: "none" }}>
+              {/* Absent bar segment (bottom) */}
+              {absentH > 0 && (
+                <rect
+                  x={barX}
+                  y={absentY}
+                  width={barW}
+                  height={absentH}
+                  fill="#EF4444"
+                  opacity={isHov ? 0.45 : 0.22}
+                  rx="1"
+                />
+              )}
+              {/* Late bar segment (middle) */}
+              {lateH > 0 && (
+                <rect
+                  x={barX}
+                  y={lateY}
+                  width={barW}
+                  height={lateH}
+                  fill="#F59E0B"
+                  opacity={isHov ? 0.65 : 0.35}
+                  rx="1"
+                />
+              )}
+              {/* Present bar segment (top) */}
+              {presentH > 0 && (
+                <rect
+                  x={barX}
+                  y={presentY}
+                  width={barW}
+                  height={presentH}
+                  fill="#10B981"
+                  opacity={isHov ? 0.75 : 0.45}
+                  rx="2"
+                />
+              )}
+            </g>
+          );
+        })}
+
         {/* Shaded Area Fill */}
         <polygon points={areaPoints} fill="url(#chartGradient)" />
 
         {/* Main Line */}
         <polyline
           fill="none"
-          stroke={C.accent}
+          stroke={lineColor}
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -516,12 +620,12 @@ function SvgTrendChart({ periods, seriesData, seriesKey, hoveredIndex, onHover }
                     cx={cx}
                     cy={cy}
                     r={isHovered ? "6" : "4"}
-                    fill={isHovered ? C.accent : C.cardBg}
-                    stroke={C.accent}
+                    fill={isHovered ? lineColor : C.cardBg}
+                    stroke={lineColor}
                     strokeWidth={isHovered ? "2.5" : "2"}
                   />
                   {isHovered && (
-                    <circle cx={cx} cy={cy} r="9" fill="none" stroke={C.accent} strokeWidth="1" strokeOpacity="0.4" />
+                    <circle cx={cx} cy={cy} r="9" fill="none" stroke={lineColor} strokeWidth="1" strokeOpacity="0.4" />
                   )}
                 </>
               ) : (
@@ -565,10 +669,19 @@ function SvgTrendChart({ periods, seriesData, seriesKey, hoveredIndex, onHover }
           <p style={{ margin: "0 0 4px", fontWeight: "700", color: C.textPrimary }}>
             {hoveredPoint.period.label_long}
           </p>
-          <div style={{ display: "flex", gap: "10px", color: C.textSecondary }}>
-            <span>Score: <strong style={{ color: C.accent }}>{Math.round(hoveredPoint.value)}%</strong></span>
-            <span>Attendance: <strong>{hoveredPoint.period.attendance?.rate_pct !== null ? `${Math.round(hoveredPoint.period.attendance?.rate_pct)}%` : "—"}</strong></span>
-            <span>Completed: <strong>{hoveredPoint.period.assignments?.completion_pct !== null ? `${Math.round(hoveredPoint.period.assignments?.completion_pct)}%` : "—"}</strong></span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px", color: C.textSecondary }}>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <span>Score: <strong style={{ color: C.accent }}>{Math.round(hoveredPoint.value)}%</strong></span>
+              <span>Attendance: <strong>{hoveredPoint.period.attendance?.rate_pct !== null ? `${Math.round(hoveredPoint.period.attendance?.rate_pct)}%` : "—"}</strong></span>
+              <span>Completed: <strong>{hoveredPoint.period.assignments?.completion_pct !== null ? `${Math.round(hoveredPoint.period.assignments?.completion_pct)}%` : "—"}</strong></span>
+            </div>
+            {hoveredPoint.period.attendance?.sessions > 0 && (
+              <div style={{ display: "flex", gap: "8px", fontSize: "11px", paddingTop: "5px", borderTop: `1px solid ${C.border}`, marginTop: "2px" }}>
+                <span style={{ color: "#10B981", fontWeight: "600" }}>🟢 {hoveredPoint.period.attendance.present} Present</span>
+                <span style={{ color: "#F59E0B", fontWeight: "600" }}>🟡 {hoveredPoint.period.attendance.late} Late (0.5x)</span>
+                <span style={{ color: "#EF4444", fontWeight: "600" }}>🔴 {hoveredPoint.period.attendance.absent} Absent</span>
+              </div>
+            )}
           </div>
         </div>
       )}

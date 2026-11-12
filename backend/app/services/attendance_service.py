@@ -7,6 +7,7 @@ is also called from analytics_service.py during feature extraction.
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
+from app.config import settings
 from app.models.models import ClassSession, AttendanceRecord, Enrollment, User
 
 
@@ -19,12 +20,18 @@ def get_course_sessions(course_id: int, db: Session) -> list[ClassSession]:
     )
 
 
-def get_student_attendance_rate(student_id: int, course_id: int, db: Session) -> Optional[float]:
+def get_student_attendance_rate(student_id: int, course_id: int, db: Session, late_weight: Optional[float] = None) -> Optional[float]:
     """
-    Returns present-rate (present + late counted as attended) as a 0.0–1.0 float,
-    or None if no sessions have been marked yet for this student in this course
-    (callers should treat None as "no data" rather than 0% attendance).
+    Returns weighted attendance rate as a 0.0–1.0 float:
+    - Present: 1.0 weight (full attendance)
+    - Late: configurable weight (defaults to settings.LATE_ATTENDANCE_WEIGHT, e.g. 0.5)
+    - Absent: 0.0 weight
+    Returns None if no sessions have been marked yet for this student in this course
+    (callers treat None as "no data" rather than 0% attendance).
     """
+    if late_weight is None:
+        late_weight = settings.LATE_ATTENDANCE_WEIGHT
+
     records = (
         db.query(AttendanceRecord)
         .join(ClassSession, ClassSession.id == AttendanceRecord.session_id)
@@ -33,12 +40,18 @@ def get_student_attendance_rate(student_id: int, course_id: int, db: Session) ->
     )
     if not records:
         return None
-    attended = sum(1 for r in records if r.status in ("present", "late"))
-    return attended / len(records)
+
+    present = sum(1 for r in records if r.status == "present")
+    late = sum(1 for r in records if r.status == "late")
+    weighted_attended = present + (late * late_weight)
+    return round(weighted_attended / len(records), 4)
 
 
-def get_course_attendance_summary(course_id: int, db: Session) -> list[dict]:
+def get_course_attendance_summary(course_id: int, db: Session, late_weight: Optional[float] = None) -> list[dict]:
     """Per-student attendance breakdown for every enrolled student in the course."""
+    if late_weight is None:
+        late_weight = settings.LATE_ATTENDANCE_WEIGHT
+
     students = (
         db.query(User)
         .join(Enrollment, Enrollment.student_id == User.id)
@@ -61,7 +74,8 @@ def get_course_attendance_summary(course_id: int, db: Session) -> list[dict]:
         absent = sum(1 for r in records if r.status == "absent")
         late = sum(1 for r in records if r.status == "late")
         marked = present + absent + late
-        rate = (present + late) / marked if marked > 0 else None
+        weighted = present + (late * late_weight)
+        rate = round(weighted / marked, 4) if marked > 0 else None
         results.append({
             "student_id": student.id,
             "student_name": student.full_name,
@@ -70,5 +84,6 @@ def get_course_attendance_summary(course_id: int, db: Session) -> list[dict]:
             "absent_count": absent,
             "late_count": late,
             "attendance_rate": rate,
+            "late_weight": late_weight,
         })
     return results

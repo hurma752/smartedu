@@ -7,17 +7,6 @@ import { C, T } from "../../theme";
 
 const RISK_VARIANT = { high: "danger", medium: "warning", low: "success" };
 
-const FEATURE_LABELS = {
-  avg_score_pct: "Average grade",
-  score_trend: "Grade trend",
-  late_rate: "Late submission rate",
-  missing_rate: "Missing assignment rate",
-  ocr_fail_rate: "Failed submission rate",
-  attendance_rate: "Attendance rate",
-  chat_engagement: "Chatbot usage",
-  download_engagement: "Material downloads",
-};
-
 const GRANULARITY_OPTIONS = [
   { id: "weekly", label: "Weekly View", desc: "Weekly trends & progress metrics" },
   { id: "monthly", label: "Monthly View", desc: "Monthly aggregate trajectory" },
@@ -34,9 +23,7 @@ const TREND_CONFIG = {
 export default function AnalyticsPanel({ courseId }) {
   const [granularity, setGranularity] = useState("weekly");
   const [progressData, setProgressData] = useState(null);
-  const [modelSummary, setModelSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [recomputing, setRecomputing] = useState(false);
   const [error, setError] = useState("");
 
   // Table filtering and search
@@ -44,18 +31,16 @@ export default function AnalyticsPanel({ courseId }) {
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "attention" | "improving" | "ontrack"
   const [selectedStudent, setSelectedStudent] = useState(null); // For detail modal
   const [cohortSeries, setCohortSeries] = useState("score"); // "score" | "attendance" | "completion"
-  const [showModelDetails, setShowModelDetails] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [progRes, modelRes] = await Promise.all([
+      const [progRes] = await Promise.all([
         analyticsApi.getCourseProgressOverview(courseId, granularity),
         analyticsApi.getCourseRisk(courseId).catch(() => ({ data: null })),
       ]);
       setProgressData(progRes.data);
-      if (modelRes?.data) setModelSummary(modelRes.data);
     } catch (err) {
       setError(getErrorMessage(err, "Couldn't load course analytics."));
     } finally {
@@ -66,21 +51,6 @@ export default function AnalyticsPanel({ courseId }) {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
-
-  const handleRecompute = async () => {
-    setRecomputing(true);
-    setError("");
-    try {
-      const { data } = await analyticsApi.recomputeCourseRisk(courseId);
-      setModelSummary(data);
-      const progRes = await analyticsApi.getCourseProgressOverview(courseId, granularity);
-      setProgressData(progRes.data);
-    } catch (err) {
-      setError(getErrorMessage(err, "Couldn't recompute risk analytics."));
-    } finally {
-      setRecomputing(false);
-    }
-  };
 
   // Filtered student list
   const filteredStudents = useMemo(() => {
@@ -127,7 +97,11 @@ export default function AnalyticsPanel({ courseId }) {
   const mediumRiskCount = progressData?.risk_breakdown?.medium || 0;
   const improvingCount = progressData?.trend_breakdown?.improving || 0;
 
-  // Calculate cohort attendance & completion averages
+  // Calculate cohort attendance & completion averages and counts
+  const totalPresent = progressData?.total_present ?? students.reduce((acc, s) => acc + (s.attendance_present || 0), 0);
+  const totalLate = progressData?.total_late ?? students.reduce((acc, s) => acc + (s.attendance_late || 0), 0);
+  const totalAbsent = progressData?.total_absent ?? students.reduce((acc, s) => acc + (s.attendance_absent || 0), 0);
+
   const avgAttendance = students.length
     ? Math.round(students.reduce((acc, s) => acc + (s.attendance_rate || 0), 0) / (students.filter(s => s.attendance_rate !== null).length || 1))
     : null;
@@ -176,12 +150,16 @@ export default function AnalyticsPanel({ courseId }) {
               {avgAttendance !== null ? `${avgAttendance}%` : "—"}
             </span>
             <span style={{ fontSize: "12px", fontWeight: "600", color: C.textMuted }}>
-              session presence
+              weighted presence
             </span>
           </div>
-          <span style={{ fontSize: "11.5px", color: C.textSecondary }}>
-            Active lecture participation
-          </span>
+          <div style={{ display: "flex", gap: "5px", fontSize: "11.5px", flexWrap: "wrap", marginTop: "2px" }}>
+            <span style={{ color: "#059669", fontWeight: "600" }}>{totalPresent} Present</span>
+            <span style={{ color: C.textMuted }}>·</span>
+            <span style={{ color: "#D97706", fontWeight: "600" }}>{totalLate} Late (0.5x)</span>
+            <span style={{ color: C.textMuted }}>·</span>
+            <span style={{ color: "#DC2626", fontWeight: "600" }}>{totalAbsent} Absent</span>
+          </div>
         </div>
 
         {/* Metric 3: Submissions Completed */}
@@ -394,6 +372,29 @@ export default function AnalyticsPanel({ courseId }) {
           </div>
         </div>
 
+        {/* Attendance Category Legend & Overall Distribution Bar */}
+        {cohortSeries === "attendance" && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", padding: "10px 20px", background: C.subtleBg, borderBottom: `1px solid ${C.border}`, fontSize: "12px" }}>
+            <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontWeight: "700", color: C.textPrimary }}>Categories:</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#059669", fontWeight: "600" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#059669" }} /> Present (100% credit)
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#D97706", fontWeight: "600" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#D97706" }} /> Late (50% weight)
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#DC2626", fontWeight: "600" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#DC2626" }} /> Absent (0% credit)
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: "8px", color: C.textSecondary, fontWeight: "600" }}>
+              <span style={{ color: "#059669" }}>{totalPresent} Total Present</span> ·
+              <span style={{ color: "#D97706" }}>{totalLate} Total Late</span> ·
+              <span style={{ color: "#DC2626" }}>{totalAbsent} Total Absent</span>
+            </div>
+          </div>
+        )}
+
         <div style={{ padding: "20px 20px 10px" }}>
           <SmoothCohortSvgChart
             trajectory={progressData?.cohort_trajectory || []}
@@ -561,9 +562,18 @@ export default function AnalyticsPanel({ courseId }) {
 
                       <td style={{ padding: "12px 18px" }}>
                         {st.attendance_rate !== null ? (
-                          <span style={{ color: st.attendance_rate >= 75 ? "#059669" : st.attendance_rate >= 60 ? "#D97706" : "#DC2626", fontWeight: "600" }}>
-                            {Math.round(st.attendance_rate)}%
-                          </span>
+                          <div>
+                            <span style={{ color: st.attendance_rate >= 75 ? "#059669" : st.attendance_rate >= 60 ? "#D97706" : "#DC2626", fontWeight: "700" }}>
+                              {Math.round(st.attendance_rate)}%
+                            </span>
+                            <div style={{ display: "flex", gap: "4px", fontSize: "11px", marginTop: "2px", whiteSpace: "nowrap" }}>
+                              <span style={{ color: "#059669", fontWeight: "600" }} title="Present">{st.attendance_present ?? 0}P</span>
+                              <span style={{ color: C.textMuted }}>·</span>
+                              <span style={{ color: "#D97706", fontWeight: "600" }} title="Late (0.5x credit)">{st.attendance_late ?? 0}L</span>
+                              <span style={{ color: C.textMuted }}>·</span>
+                              <span style={{ color: "#DC2626", fontWeight: "600" }} title="Absent">{st.attendance_absent ?? 0}A</span>
+                            </div>
+                          </div>
                         ) : (
                           <span style={{ color: C.textMuted }}>—</span>
                         )}
@@ -618,96 +628,7 @@ export default function AnalyticsPanel({ courseId }) {
         </div>
       </Card>
 
-      {/* ── 5. AI Risk Model & Feature Importance (Collapsible Secondary Card) ── */}
-      <Card>
-        <div
-          onClick={() => setShowModelDetails(!showModelDetails)}
-          style={{
-            padding: "14px 20px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            cursor: "pointer",
-            userSelect: "none",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <i className="ti ti-brain" style={{ color: C.accent, fontSize: "18px" }} />
-            <div>
-              <h4 style={{ fontSize: "14px", fontWeight: "700", color: C.textPrimary, margin: 0 }}>
-                Predictive Risk Model Details & Supervised Feature Weights
-              </h4>
-              <p style={{ fontSize: "11.5px", color: C.textMuted, margin: "1px 0 0" }}>
-                {modelSummary?.model_version === "rf-v1" ? "RandomForest Weakly-Supervised Classifier Active" : "Rule-Based Continuous Risk Scorer Active"}
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <Btn size="sm" onClick={(e) => { e.stopPropagation(); handleRecompute(); }} disabled={recomputing}>
-              {recomputing ? "Recomputing…" : "Recompute Model"}
-            </Btn>
-            <i className={`ti ti-chevron-${showModelDetails ? "up" : "down"}`} style={{ color: C.textMuted, fontSize: "16px" }} />
-          </div>
-        </div>
-
-        {showModelDetails && (
-          <div style={{ padding: "16px 20px", borderTop: `1px solid ${C.border}`, background: C.subtleBg }}>
-            {modelSummary?.feature_importance ? (
-              <>
-                <p style={{ fontSize: "12px", color: C.textSecondary, margin: "0 0 12px" }}>
-                  The relative weight each feature has when predicting whether a student needs intervention in this course:
-                </p>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "10px" }}>
-                  {Object.entries(modelSummary.feature_importance)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([key, importance]) => (
-                      <div key={key} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "7px", padding: "10px 12px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
-                          <span style={{ color: C.textSecondary, fontWeight: "500" }}>{FEATURE_LABELS[key] || key}</span>
-                          <strong style={{ color: C.textPrimary }}>{(importance * 100).toFixed(0)}%</strong>
-                        </div>
-                        <div style={{ height: "5px", background: C.subtleBg, borderRadius: "4px", overflow: "hidden", border: `1px solid ${C.border}` }}>
-                          <div style={{ height: "100%", width: `${importance * 100}%`, background: C.accent, borderRadius: "4px" }} />
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: C.textSecondary, fontSize: "12.5px" }}>
-                  <i className="ti ti-info-circle" style={{ color: C.accent, fontSize: "16px" }} />
-                  <span>
-                    <strong>Rule-Based Heuristic Evaluation Active:</strong> Risk scores are currently assessed based on foundational course indicators.
-                  </span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px", marginTop: "4px" }}>
-                  {[
-                    { label: "Grade Average Threshold", desc: "Grades below 50% trigger risk flags", icon: "ti-certificate" },
-                    { label: "Attendance Threshold", desc: "Session presence below 60% flags intervention", icon: "ti-calendar-event" },
-                    { label: "Missing Assignment Rate", desc: "Unsubmitted work above 40% raises risk priority", icon: "ti-file-x" },
-                    { label: "Late Submissions & Engagement", desc: "Late submissions and LMS chat engagement activity", icon: "ti-messages" },
-                  ].map((rule, idx) => (
-                    <div key={idx} style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "7px", padding: "10px 12px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
-                        <i className={`ti ${rule.icon}`} style={{ color: C.accent, fontSize: "14px" }} />
-                        <span style={{ fontSize: "12px", fontWeight: "600", color: C.textPrimary }}>{rule.label}</span>
-                      </div>
-                      <p style={{ fontSize: "11.5px", color: C.textMuted, margin: 0 }}>{rule.desc}</p>
-                    </div>
-                  ))}
-                </div>
-                <p style={{ fontSize: "11.5px", color: C.textMuted, margin: "6px 0 0" }}>
-                  💡 <em>Click <strong>"Recompute Model"</strong> to train a supervised RandomForest classifier when course has sufficient student records (4+ students).</em>
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* ── 6. Student Detail Modal / Slide-over Drawer ── */}
+      {/* ── 5. Student Detail Modal / Slide-over Drawer ── */}
       {selectedStudent && (
         <StudentDetailModal
           courseId={courseId}
@@ -769,6 +690,9 @@ function SmoothCohortSvgChart({ trajectory, seriesKey }) {
     val: item[targetProp],
     hasVal: item[targetProp] !== null && item[targetProp] !== undefined,
     students: item.active_students,
+    present: item.present_count || 0,
+    late: item.late_count || 0,
+    absent: item.absent_count || 0,
   }));
 
   const validPoints = points.filter((p) => p.hasVal);
@@ -854,6 +778,44 @@ function SmoothCohortSvgChart({ trajectory, seriesKey }) {
           );
         })}
 
+        {/* Attendance Stacked Category Bars (Present = Green, Late = Amber, Absent = Red) */}
+        {seriesKey === "attendance" && points.map((p, i) => {
+          const total = (p.present || 0) + (p.late || 0) + (p.absent || 0);
+          if (total === 0) return null;
+
+          const cx = getX(i);
+          const barW = Math.max(10, Math.min(26, plotWidth / (points.length * 2.5)));
+          const barX = cx - barW / 2;
+
+          const presentFrac = p.present / total;
+          const lateFrac = p.late / total;
+          const absentFrac = p.absent / total;
+
+          const maxBarH = plotHeight;
+          const presentH = presentFrac * maxBarH;
+          const lateH = lateFrac * maxBarH;
+          const absentH = absentFrac * maxBarH;
+
+          const baseY = padding.top + plotHeight;
+          const absentY = baseY - absentH;
+          const lateY = absentY - lateH;
+          const presentY = lateY - presentH;
+
+          return (
+            <g key={`bar_${i}`} style={{ pointerEvents: "none" }}>
+              {absentH > 0 && (
+                <rect x={barX} y={absentY} width={barW} height={absentH} fill="#DC2626" opacity={0.25} rx="1" />
+              )}
+              {lateH > 0 && (
+                <rect x={barX} y={lateY} width={barW} height={lateH} fill="#D97706" opacity={0.4} rx="1" />
+              )}
+              {presentH > 0 && (
+                <rect x={barX} y={presentY} width={barW} height={presentH} fill="#059669" opacity={0.5} rx="2" />
+              )}
+            </g>
+          );
+        })}
+
         {/* Area fill */}
         {areaPath && <path d={areaPath} fill={`url(#grad_cohort_${seriesKey})`} />}
 
@@ -869,7 +831,11 @@ function SmoothCohortSvgChart({ trajectory, seriesKey }) {
               {p.hasVal ? (
                 <>
                   <circle cx={cx} cy={cy} r="5" fill="#FFF" stroke={color} strokeWidth="2.5" />
-                  <title>{`${p.label_long}: ${Math.round(p.val)}% (${p.students} students active)`}</title>
+                  <title>
+                    {seriesKey === "attendance"
+                      ? `${p.label_long}: ${Math.round(p.val)}% weighted attendance (${p.present} Present, ${p.late} Late, ${p.absent} Absent · ${p.students} students)`
+                      : `${p.label_long}: ${Math.round(p.val)}% (${p.students} students active)`}
+                  </title>
                 </>
               ) : (
                 <circle cx={cx} cy={bottomY} r="2.5" fill="#D1D5DB" />
@@ -981,6 +947,13 @@ function StudentDetailModal({ courseId, student, onClose }) {
               <p style={{ fontSize: "20px", fontWeight: "800", color: C.textPrimary, margin: "4px 0 0" }}>
                 {student.attendance_rate !== null ? `${Math.round(student.attendance_rate)}%` : "—"}
               </p>
+              <div style={{ display: "flex", gap: "4px", fontSize: "11px", marginTop: "4px", flexWrap: "wrap" }}>
+                <span style={{ color: "#059669", fontWeight: "600" }}>{student.attendance_present ?? 0}P</span>
+                <span style={{ color: C.textMuted }}>·</span>
+                <span style={{ color: "#D97706", fontWeight: "600" }}>{student.attendance_late ?? 0}L (0.5x)</span>
+                <span style={{ color: C.textMuted }}>·</span>
+                <span style={{ color: "#DC2626", fontWeight: "600" }}>{student.attendance_absent ?? 0}A</span>
+              </div>
             </div>
             <div style={{ background: C.subtleBg, padding: "12px", borderRadius: "8px", border: `1px solid ${C.border}` }}>
               <span style={{ fontSize: "11px", color: C.textMuted, textTransform: "uppercase", fontWeight: "700" }}>Submissions</span>
@@ -1003,9 +976,18 @@ function StudentDetailModal({ courseId, student, onClose }) {
                       <span style={{ color: C.textSecondary, display: "flex", alignItems: "center", gap: "4px" }}>
                         <i className={`ti ${dim.icon}`} style={{ color: C.accent }} /> {dim.label}
                       </span>
-                      <strong style={{ color: dim.has_data ? C.textPrimary : C.textMuted }}>
-                        {dim.has_data ? `${Math.round(dim.score)}%` : "—"}
-                      </strong>
+                      <div style={{ textAlign: "right" }}>
+                        <strong style={{ color: dim.has_data ? C.textPrimary : C.textMuted }}>
+                          {dim.has_data ? `${Math.round(dim.score)}%` : "—"}
+                        </strong>
+                        {dim.key === "attendance" && dim.has_data && (
+                          <div style={{ fontSize: "10.5px", color: C.textMuted }}>
+                            <span style={{ color: "#059669", fontWeight: "600" }}>{student.attendance_present ?? 0}P</span> · {" "}
+                            <span style={{ color: "#D97706", fontWeight: "600" }}>{student.attendance_late ?? 0}L</span> · {" "}
+                            <span style={{ color: "#DC2626", fontWeight: "600" }}>{student.attendance_absent ?? 0}A</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div style={{ height: "5px", background: C.subtleBg, borderRadius: "4px", overflow: "hidden", border: `1px solid ${C.border}` }}>
                       <div style={{ height: "100%", width: `${dim.has_data ? Math.min(100, Math.max(4, dim.score)) : 0}%`, background: !dim.has_data ? "transparent" : dim.score >= 75 ? "#059669" : dim.score >= 50 ? "#D97706" : "#DC2626", borderRadius: "4px" }} />

@@ -16,7 +16,7 @@ from app.models.models import User, Enrollment
 from app.schemas.analytics import CourseRiskSummary, StudentProgressResponse, CourseProgressOverviewResponse
 from app.utils.auth import require_role, get_current_user
 from app.routers.courses import get_course_for_access
-from app.services import analytics_service, progress_service
+from app.services import analytics_service, progress_service, attendance_service
 
 router = APIRouter()
 
@@ -152,17 +152,9 @@ def assess_student_risk_ml(
     if not enrolled:
         raise HTTPException(404, "Student is not enrolled in this course")
 
-    # 2. Extract Attendance Rate
-    total_sessions = db.query(ClassSession).filter(ClassSession.course_id == course_id).count()
-    if total_sessions > 0:
-        attended = db.query(AttendanceRecord).join(ClassSession).filter(
-            ClassSession.course_id == course_id,
-            AttendanceRecord.student_id == student_id,
-            AttendanceRecord.status == "present"
-        ).count()
-        attendance_rate = attended / total_sessions
-    else:
-        attendance_rate = 1.0
+    # 2. Extract Attendance Rate (uses weighted attendance: 1.0 Present, configurable Late weight, 0.0 Absent)
+    att_rate = attendance_service.get_student_attendance_rate(student_id, course_id, db)
+    attendance_rate = att_rate if att_rate is not None else 1.0
 
     # 3. Extract Submission Rate
     total_assignments = db.query(Assignment).filter(Assignment.course_id == course_id).count()
