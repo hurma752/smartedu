@@ -158,14 +158,17 @@ def evaluate_submission_task(submission_id: int, file_path: str, db_session_fact
             submission.ocr_engine_used = extraction.get("ocr_engine_used")
             submission.extraction_status = extraction.get("extraction_status")
             submission.ocr_processing_time = extraction.get("processing_time")
+            if extraction.get("page_details"):
+                submission.ocr_details = json.dumps(extraction.get("page_details"))
+            submission.needs_review = extraction.get("needs_review", False)
 
             if extraction["low_confidence"]:
-                submission.status = "failed"
+                submission.status = "ocr_low_confidence"
                 conf_str = f"{extraction['confidence']:.0f}%" if extraction['confidence'] is not None else "N/A"
                 engine_str = f" using {extraction['ocr_engine_used']}" if extraction.get('ocr_engine_used') else ""
                 submission.error_message = (
-                    f"Text extraction confidence was too low ({conf_str}){engine_str} to reliably "
-                    "evaluate this submission. Please ask the student to resubmit a clearer scan."
+                    f"Text extraction confidence was low ({conf_str}){engine_str}. "
+                    "Please review and correct the transcript below before evaluating."
                 )
                 db.commit()
                 return

@@ -60,3 +60,7 @@ class CourseProgressOverviewResponse(BaseModel):
     cohort_trajectory: List[Dict[str, Any]]
     interventions: List[Dict[str, Any]]
     students: List[Dict[str, Any]]
+    total_present: Optional[int] = 0
+    total_late: Optional[int] = 0
+    total_absent: Optional[int] = 0
+    late_attendance_weight: Optional[float] = 0.5

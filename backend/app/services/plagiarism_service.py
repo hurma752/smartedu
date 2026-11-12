@@ -251,6 +251,13 @@ def compute_plagiarism_report(submission_id: int, db: Session) -> PlagiarismRepo
     if not submission or not submission.extracted_text:
         return None
 
+    # Exclude uncorrected low-confidence OCR submissions from plagiarism analysis
+    if submission.extraction_status == "ocr_low_confidence":
+        submission.plagiarism_score = None
+        submission.detection_status = "skipped_low_confidence_ocr"
+        db.commit()
+        return None
+
     assignment = db.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
     if not assignment:
         return None
@@ -295,12 +302,14 @@ def compute_plagiarism_report(submission_id: int, db: Session) -> PlagiarismRepo
     ).all()
     course_assignment_ids = [a.id for a in course_assignments]
 
+    # Exclude candidates with uncorrected low-confidence OCR
     candidates = db.query(Submission).filter(
         Submission.assignment_id.in_(course_assignment_ids),
         Submission.id != submission_id,
         Submission.student_id != submission.student_id,
         Submission.extracted_text.isnot(None),
         Submission.extracted_text != "",
+        (Submission.extraction_status != "ocr_low_confidence") | (Submission.extraction_status == None),
     ).all()
 
     if not candidates:

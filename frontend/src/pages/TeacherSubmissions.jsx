@@ -257,13 +257,14 @@ export default function TeacherSubmissions() {
                 />
               )}
 
-              {/* OCR Text */}
-              {selected.extracted_text && selected.extraction_method === "ocr" && (
+              {/* OCR Text Block */}
+              {selected.extracted_text && (
                 <OCRBlock
                   text={selected.extracted_text}
                   confidence={selected.extraction_confidence}
                   engine={selected.ocr_engine_used}
                   status={selected.extraction_status}
+                  needsReview={selected.needs_review}
                   processingTime={selected.ocr_processing_time}
                   submissionId={selected.id}
                   onReprocess={loadSubmissions}
@@ -618,8 +619,8 @@ function PlagiarismCard({ submissionId, assignmentId, onRecomputed }) {
   );
 }
 
-function OCRBlock({ text, confidence, engine, status, processingTime, submissionId, onReprocess }) {
-  const [open, setOpen] = useState(false);
+function OCRBlock({ text, confidence, engine, status, needsReview, processingTime, submissionId, onReprocess }) {
+  const [open, setOpen] = useState(true);
   const [reprocessing, setReprocessing] = useState(false);
 
   const handleReprocess = async (e) => {
@@ -637,21 +638,32 @@ function OCRBlock({ text, confidence, engine, status, processingTime, submission
   };
 
   const engineLabel = {
+    pymupdf: "PyMuPDF (typed)",
     tesseract: "Tesseract",
     trocr: "TrOCR (handwriting)",
+    "vlm+trocr": "Hybrid VLM + TrOCR",
+    vlm: "Ollama VLM",
     "tesseract+trocr": "Tesseract + TrOCR",
     tesseract_fallback: "Tesseract (fallback)",
   }[engine] || engine;
 
+  const isUncertain = needsReview || status === "ocr_needs_review" || status === "ocr_low_confidence";
+
   return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${isUncertain ? C.warningBorder || "#F59E0B" : C.border}`, overflow: "hidden", marginBottom: "16px" }}>
       <button
         onClick={() => setOpen(!open)}
-        style={{ width: "100%", padding: "12px 16px", background: "none", border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontFamily: "inherit", flexWrap: "wrap", gap: "8px" }}
+        style={{ width: "100%", padding: "12px 16px", background: isUncertain ? C.warningBg : "none", border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontFamily: "inherit", flexWrap: "wrap", gap: "8px" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          <i className="ti ti-scan" style={{ fontSize: "16px", color: C.accent }} />
-          <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Extracted OCR Text</span>
+          <i className="ti ti-scan" style={{ fontSize: "16px", color: isUncertain ? C.warningText : C.accent }} />
+          <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary }}>Extracted OCR Text</span>
+          {isUncertain && (
+            <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", background: C.warningBg, border: `1px solid ${C.warningText}`, color: C.warningText, display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              <i className="ti ti-alert-triangle" style={{ fontSize: "12px" }} />
+              OCR Uncertain (Needs Review)
+            </span>
+          )}
           {engine && (
             <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary }}>
               Engine: {engineLabel}
@@ -659,12 +671,7 @@ function OCRBlock({ text, confidence, engine, status, processingTime, submission
           )}
           {confidence != null && (
             <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary }}>
-              Confidence: {Math.round(confidence)}%
-            </span>
-          )}
-          {status && (
-            <span style={{ fontSize: "11px", fontWeight: "600", padding: "2px 8px", borderRadius: "12px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textSecondary }}>
-              Status: {status.replace(/_/g, " ")}
+              Quality Score: {Math.round(confidence)}%
             </span>
           )}
           {processingTime != null && (
@@ -681,7 +688,7 @@ function OCRBlock({ text, confidence, engine, status, processingTime, submission
               className="btn-interactive"
               style={{
                 display: "inline-flex", alignItems: "center", gap: "4px",
-                padding: "3px 8px", borderRadius: "5px",
+                padding: "4px 10px", borderRadius: "5px",
                 background: C.subtleBg, border: `1px solid ${C.border}`,
                 color: C.textSecondary, fontSize: "11px", fontWeight: "600",
                 cursor: reprocessing ? "not-allowed" : "pointer",
@@ -694,9 +701,10 @@ function OCRBlock({ text, confidence, engine, status, processingTime, submission
           <i className={`ti ${open ? "ti-chevron-up" : "ti-chevron-down"}`} style={{ fontSize: "14px", color: C.textMuted }} />
         </div>
       </button>
+
       {open && (
-        <div style={{ padding: "0 16px 14px", borderTop: `1px solid ${C.border}` }}>
-          <pre style={{ fontSize: "12px", color: C.textSecondary, background: C.subtleBg, padding: "12px", borderRadius: "6px", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontFamily: "monospace" }}>
+        <div style={{ padding: "16px", borderTop: `1px solid ${C.border}` }}>
+          <pre style={{ fontSize: "12px", color: C.textSecondary, background: C.subtleBg, padding: "14px", borderRadius: "6px", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontFamily: "monospace", maxHeight: "400px", overflowY: "auto" }}>
             {text}
           </pre>
         </div>

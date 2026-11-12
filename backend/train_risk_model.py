@@ -38,4 +38,4 @@ os.makedirs("app/ml", exist_ok=True)
 model_path = "app/ml/risk_model.pkl"
 joblib.dump(clf, model_path)
 
-print(f"✅ Random Forest model successfully saved to {model_path}")
+print(f"[SUCCESS] Random Forest model successfully saved to {model_path}")

@@ -136,3 +136,5 @@ websockets==15.0.1
 xxhash==3.7.0
 yarl==1.24.2
 zstandard==0.25.0
+rapidfuzz>=3.0.0
+jiwer>=4.0.0

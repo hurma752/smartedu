@@ -181,6 +181,8 @@ class Submission(Base):
     ocr_engine_used = Column(String(30), nullable=True)
     extraction_status = Column(String(30), nullable=True)
     ocr_processing_time = Column(Float, nullable=True)
+    ocr_details = Column(Text, nullable=True)
+    needs_review = Column(Boolean, default=False, nullable=True)
     status = Column(String(30), default="processing")
     error_message = Column(Text, nullable=True)
     submitted_at = Column(DateTime, server_default=func.now())

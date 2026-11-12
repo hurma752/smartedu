@@ -52,3 +52,4 @@ class StudentAttendanceSummary(BaseModel):
     absent_count: int
     late_count: int
     attendance_rate: Optional[float] = None  # None if no sessions recorded yet
+    late_weight: Optional[float] = None

@@ -2,11 +2,12 @@
 import os
 import shutil
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from fastapi.responses import FileResponse
 from datetime import datetime
 from pydantic import BaseModel
+import fitz
 
 from app.database.db import get_db, SessionLocal
 from app.schemas.assignment import (
@@ -31,6 +32,10 @@ router = APIRouter()
 class ExtendDeadlineRequest(BaseModel):
     new_due_date: datetime
     reason: Optional[str] = None
+
+
+class ExtractedTextUpdate(BaseModel):
+    extracted_text: str
 
 
 # ---------- Teacher: create assignment ----------
@@ -328,6 +333,90 @@ def reprocess_ocr(
         db_session_factory=SessionLocal,
     )
     return {"status": "reprocessing"}
+
+
+# ---------- Teacher: save corrected transcript & re-evaluate ----------
+@router.put("/submissions/{submission_id}/extracted-text")
+def update_extracted_text(
+    submission_id: int,
+    payload: ExtractedTextUpdate,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+    get_course_for_access(submission.assignment.course_id, current_user, db)
+
+    if not payload.extracted_text or not payload.extracted_text.strip():
+        raise HTTPException(400, "Extracted text cannot be empty")
+
+    submission.extracted_text = payload.extracted_text.strip()
+    submission.extraction_status = "teacher_corrected"
+    submission.needs_review = False
+    submission.status = "processing"
+    submission.error_message = None
+
+    # Clear stale AI evaluation record
+    db.query(AIEvaluation).filter(AIEvaluation.submission_id == submission.id).delete()
+    db.commit()
+
+    # Recompute plagiarism with updated corrected text
+    try:
+        compute_plagiarism_report(submission.id, db)
+    except Exception as p_err:
+        pass
+
+    # Enqueue re-grading via background task
+    background_tasks.add_task(
+        evaluate_submission_task,
+        submission_id=submission.id,
+        file_path=submission.file_path,
+        db_session_factory=SessionLocal,
+    )
+    return {"status": "updated_and_re_evaluating", "submission_id": submission.id}
+
+
+# ---------- Teacher: render PDF page image on demand ----------
+@router.get("/submissions/{submission_id}/page-image")
+def get_submission_page_image(
+    submission_id: int,
+    page_num: int = Query(1, ge=1),
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+    get_course_for_access(submission.assignment.course_id, current_user, db)
+
+    resolved_path = submission.file_path
+    if not resolved_path or not os.path.exists(resolved_path):
+        # Try resolving path relative to backend directory if needed
+        for alt in [os.path.join("backend", resolved_path or ""), os.path.join("uploads", os.path.basename(resolved_path or ""))]:
+            if os.path.exists(alt):
+                resolved_path = alt
+                break
+
+    if not resolved_path or not os.path.exists(resolved_path):
+        raise HTTPException(404, "Submission PDF file not found on disk")
+
+    try:
+        doc = fitz.open(resolved_path)
+        if page_num < 1 or page_num > len(doc):
+            doc.close()
+            raise HTTPException(400, f"Page number {page_num} out of bounds (1 to {len(doc)})")
+
+        page = doc[page_num - 1]
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        doc.close()
+        return Response(content=img_bytes, media_type="image/png")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to render page image: {exc}")
 
 
 # ---------- Student: check own submission status ----------

@@ -24,3 +24,7 @@ export const getCourseProgressOverview = (courseId, granularity = "weekly", peri
   if (periods) params.periods = periods;
   return client.get(`/analytics/${courseId}/progress-overview`, { params });
 };
+
+export const assessStudentRiskML = (courseId, studentId) =>
+  client.post(`/analytics/${courseId}/students/${studentId}/assess-risk`);
+
