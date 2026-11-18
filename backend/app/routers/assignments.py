@@ -1,5 +1,6 @@
 # app/routers/assignments.py
 import os
+import re
 import shutil
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException, Query, Response
@@ -12,16 +13,17 @@ import fitz
 from app.database.db import get_db, SessionLocal
 from app.schemas.assignment import (
     AssignmentCreate, AssignmentResponse, SubmissionResponse,
-    AIEvaluationResponse, TeacherReviewRequest, FinalGradeResponse,
+    AIEvaluationResponse, TeacherReviewRequest, GradeUpdateRequest,
+    FinalGradeResponse, GradeHistoryItem,
 )
 from app.utils.auth import require_role, get_current_user
 from app.routers.courses import get_course_for_access
 from app.services.evaluation_service import evaluate_submission_task
 from app.services.badge_service import evaluate_assignment_badges, get_assignment_badges
-from app.services.cache_service import lms_context_cache
+from app.services.cache_service import lms_context_cache, response_cache
 from app.config import settings
 from app.models.models import (
-    User, Assignment, Submission, AIEvaluation, FinalGrade, Enrollment,
+    User, Assignment, Submission, AIEvaluation, FinalGrade, GradeHistory, Enrollment,
     Rubric, RubricCriterion, AssignmentDeadlineHistory, PlagiarismReport, StudentAchievement
 )
 from app.services.plagiarism_service import compute_plagiarism_report, recompute_assignment_plagiarism
@@ -476,6 +478,158 @@ def get_ai_evaluation(
     return submission.ai_evaluation
 
 
+def _validate_rubric_scores(
+    submission: Submission,
+    criteria_scores: dict,
+    db: Session,
+) -> int:
+    """
+    Validate that:
+    1. Criteria scores are provided and all values are non-negative integers.
+    2. No criterion score exceeds the maximum marks defined for that rubric criterion.
+    3. The total awarded marks do not exceed the total marks defined in the rubric.
+    Returns the validated total score.
+    """
+    if not criteria_scores:
+        raise HTTPException(status_code=400, detail="Criteria scores are required")
+
+    assignment = submission.assignment
+    if not assignment:
+        assignment = db.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found for this submission")
+
+    rubric = db.query(Rubric).filter(Rubric.id == assignment.rubric_id).first()
+    criteria = (
+        db.query(RubricCriterion)
+        .filter(RubricCriterion.rubric_id == assignment.rubric_id)
+        .order_by(RubricCriterion.id)
+        .all()
+    )
+
+    criteria_by_key = {c.key: c for c in criteria}
+    criteria_by_key_norm = {re.sub(r'[^a-z0-9_]', '', c.key.lower().replace('-', '_')): c for c in criteria}
+    criteria_by_label_norm = {re.sub(r'[^a-z0-9_]', '', c.label.lower().replace('-', '_')): c for c in criteria}
+
+    total_score = 0
+    for key, raw_val in criteria_scores.items():
+        try:
+            val = int(raw_val)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Score for criterion '{key}' must be a valid integer."
+            )
+
+        if val < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Marks for criterion '{key}' cannot be negative."
+            )
+
+        norm_key = re.sub(r'[^a-z0-9_]', '', str(key).lower().replace('-', '_'))
+        matched_criterion = (
+            criteria_by_key.get(key)
+            or criteria_by_key_norm.get(norm_key)
+            or criteria_by_label_norm.get(norm_key)
+        )
+
+        if matched_criterion:
+            if val > matched_criterion.max_marks:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Marks awarded for '{matched_criterion.label}' ({val}) exceed the maximum "
+                        f"allowed marks ({matched_criterion.max_marks}) defined for this criterion."
+                    )
+                )
+        elif criteria:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Criterion '{key}' is not defined in the assignment rubric."
+            )
+
+        total_score += val
+
+    rubric_total_marks = (
+        rubric.total_marks
+        if rubric and rubric.total_marks
+        else sum(c.max_marks for c in criteria)
+    )
+
+    if rubric_total_marks > 0 and total_score > rubric_total_marks:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Total awarded marks ({total_score}) exceed the maximum "
+                f"total marks ({rubric_total_marks}) defined in the rubric."
+            )
+        )
+
+    return total_score
+
+
+def _update_submission_grade(
+    submission: Submission,
+    payload: TeacherReviewRequest | GradeUpdateRequest,
+    current_user: User,
+    db: Session,
+) -> FinalGrade:
+    if not submission.final_grade:
+        raise HTTPException(400, "Cannot edit grade before initial grading is completed")
+
+    if not payload.criteria_scores:
+        raise HTTPException(400, "Criteria scores are required")
+
+    new_total_score = _validate_rubric_scores(submission, payload.criteria_scores, db)
+
+    previous_total = submission.final_grade.total_score
+    previous_criteria = submission.final_grade.criteria_scores
+    previous_comments = submission.final_grade.teacher_comments
+
+    was_overridden = bool(
+        submission.ai_evaluation and payload.criteria_scores != submission.ai_evaluation.criteria_scores
+    )
+
+    reason = getattr(payload, "reason", None)
+
+    # Record grade revision in GradeHistory audit log
+    history_entry = GradeHistory(
+        submission_id=submission.id,
+        final_grade_id=submission.final_grade.id,
+        previous_total_score=previous_total,
+        new_total_score=new_total_score,
+        previous_criteria_scores=previous_criteria,
+        new_criteria_scores=payload.criteria_scores,
+        previous_comments=previous_comments,
+        new_comments=payload.teacher_comments,
+        reason=reason,
+        updated_by=current_user.id,
+    )
+    db.add(history_entry)
+
+    # Update final grade record
+    submission.final_grade.criteria_scores = payload.criteria_scores
+    submission.final_grade.total_score = new_total_score
+    submission.final_grade.teacher_comments = payload.teacher_comments
+    submission.final_grade.was_ai_overridden = was_overridden
+    submission.final_grade.reviewed_by = current_user.id
+    submission.final_grade.updated_at = datetime.utcnow()
+    submission.status = "teacher_reviewed"
+
+    db.commit()
+    db.refresh(submission.final_grade)
+
+    # Invalidate LMS context and response caches so chatbot and student reflect changes immediately
+    lms_context_cache.clear()
+    response_cache.clear()
+
+    # Re-evaluate badges for the assignment (High Achiever, Perfect Score)
+    evaluate_assignment_badges(submission.assignment_id, db)
+
+    return submission.final_grade
+
+
 # ---------- Teacher: approve/override -> creates FINAL grade ----------
 @router.post("/submissions/{submission_id}/review", response_model=FinalGradeResponse)
 def review_submission(
@@ -491,10 +645,12 @@ def review_submission(
 
     if not submission.ai_evaluation:
         raise HTTPException(400, "Cannot review before AI evaluation completes")
-    if submission.final_grade:
-        raise HTTPException(400, "This submission has already been reviewed")
 
-    total_score = sum(payload.criteria_scores.values())
+    # If already reviewed, seamlessly delegate to grade update
+    if submission.final_grade:
+        return _update_submission_grade(submission, payload, current_user, db)
+
+    total_score = _validate_rubric_scores(submission, payload.criteria_scores, db)
     was_overridden = payload.criteria_scores != submission.ai_evaluation.criteria_scores
 
     final_grade = FinalGrade(
@@ -507,13 +663,74 @@ def review_submission(
     db.commit()
     db.refresh(final_grade)
 
+    # Invalidate LMS context and response caches
+    lms_context_cache.clear()
+    response_cache.clear()
+
     # Trigger badge evaluation (High Achiever & Perfect Score)
     evaluate_assignment_badges(submission.assignment_id, db)
 
     return final_grade
 
 
-# ---------- Student: view final grade ----------
+# ---------- Teacher: Edit/update finalized grade ----------
+@router.put("/submissions/{submission_id}/grade", response_model=FinalGradeResponse)
+@router.put("/submissions/{submission_id}/review", response_model=FinalGradeResponse)
+def edit_submission_grade(
+    submission_id: int,
+    payload: GradeUpdateRequest,
+    current_user: User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db),
+):
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+    get_course_for_access(submission.assignment.course_id, current_user, db)
+
+    return _update_submission_grade(submission, payload, current_user, db)
+
+
+# ---------- Grade history audit log ----------
+@router.get("/submissions/{submission_id}/grade-history", response_model=List[GradeHistoryItem])
+def get_grade_history(
+    submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+
+    if current_user.role == "student":
+        if submission.student_id != current_user.id:
+            raise HTTPException(403, "Not your submission")
+    elif current_user.role == "teacher":
+        get_course_for_access(submission.assignment.course_id, current_user, db)
+
+    histories = db.query(GradeHistory).filter(
+        GradeHistory.submission_id == submission_id
+    ).order_by(GradeHistory.id.desc()).all()
+
+    results = []
+    for h in histories:
+        results.append({
+            "id": h.id,
+            "submission_id": h.submission_id,
+            "previous_total_score": h.previous_total_score,
+            "new_total_score": h.new_total_score,
+            "previous_criteria_scores": h.previous_criteria_scores or {},
+            "new_criteria_scores": h.new_criteria_scores or {},
+            "previous_comments": h.previous_comments,
+            "new_comments": h.new_comments,
+            "reason": h.reason,
+            "updated_by": h.updated_by,
+            "updated_by_name": h.updater.full_name if h.updater else "Teacher",
+            "updated_at": h.updated_at,
+        })
+    return results
+
+
+# ---------- Student/Teacher: view final grade ----------
 @router.get("/submissions/{submission_id}/grade")
 def get_final_grade(
     submission_id: int,
@@ -525,6 +742,8 @@ def get_final_grade(
         raise HTTPException(404, "Submission not found")
     if current_user.role == "student" and submission.student_id != current_user.id:
         raise HTTPException(403, "Not your submission")
+    elif current_user.role == "teacher":
+        get_course_for_access(submission.assignment.course_id, current_user, db)
 
     if not submission.final_grade:
         raise HTTPException(404, "This submission has not been graded yet")
@@ -541,6 +760,7 @@ def get_final_grade(
         "teacher_comments": grade.teacher_comments,
         "was_ai_overridden": grade.was_ai_overridden,
         "reviewed_at": grade.reviewed_at,
+        "updated_at": grade.updated_at,
         "ai_feedback": ai_feedback,
     }
 
@@ -580,6 +800,7 @@ def delete_assignment(
     db.query(AssignmentDeadlineHistory).filter(AssignmentDeadlineHistory.assignment_id == assignment_id).delete(synchronize_session=False)
 
     if submission_ids:
+        db.query(GradeHistory).filter(GradeHistory.submission_id.in_(submission_ids)).delete(synchronize_session=False)
         # Nullify foreign key references in other plagiarism reports pointing to these submissions
         db.query(PlagiarismReport).filter(
             PlagiarismReport.matched_submission_id.in_(submission_ids)

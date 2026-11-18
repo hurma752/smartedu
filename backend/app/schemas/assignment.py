@@ -1,5 +1,5 @@
 # app/schemas/assignment.py
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
@@ -88,6 +88,33 @@ class AIEvaluationResponse(BaseModel):
 class TeacherReviewRequest(BaseModel):
     criteria_scores: Dict[str, int]
     teacher_comments: Optional[str] = None
+    reason: Optional[str] = None
+
+    @field_validator("criteria_scores")
+    @classmethod
+    def validate_scores_non_negative(cls, v: Dict[str, int]) -> Dict[str, int]:
+        if not v:
+            raise ValueError("Criteria scores cannot be empty")
+        for key, score in v.items():
+            if score < 0:
+                raise ValueError(f"Marks for '{key}' cannot be negative")
+        return v
+
+
+class GradeUpdateRequest(BaseModel):
+    criteria_scores: Dict[str, int]
+    teacher_comments: Optional[str] = None
+    reason: Optional[str] = None
+
+    @field_validator("criteria_scores")
+    @classmethod
+    def validate_scores_non_negative(cls, v: Dict[str, int]) -> Dict[str, int]:
+        if not v:
+            raise ValueError("Criteria scores cannot be empty")
+        for key, score in v.items():
+            if score < 0:
+                raise ValueError(f"Marks for '{key}' cannot be negative")
+        return v
 
 
 class FinalGradeResponse(BaseModel):
@@ -96,7 +123,26 @@ class FinalGradeResponse(BaseModel):
     teacher_comments: Optional[str]
     was_ai_overridden: bool
     reviewed_at: datetime
+    updated_at: Optional[datetime] = None
     ai_feedback: Optional[Any] = None  # pass through rich feedback to student
+
+    class Config:
+        from_attributes = True
+
+
+class GradeHistoryItem(BaseModel):
+    id: int
+    submission_id: int
+    previous_total_score: int
+    new_total_score: int
+    previous_criteria_scores: Dict[str, Any]
+    new_criteria_scores: Dict[str, Any]
+    previous_comments: Optional[str] = None
+    new_comments: Optional[str] = None
+    reason: Optional[str] = None
+    updated_by: int
+    updated_by_name: Optional[str] = None
+    updated_at: datetime
 
     class Config:
         from_attributes = True

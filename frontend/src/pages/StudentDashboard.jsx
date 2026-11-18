@@ -51,7 +51,7 @@ export default function StudentDashboard() {
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
               {badges.map((b) => (
-                <BadgePill key={b.id} badge={b} size="md" />
+                <BadgePill key={b.id} badge={b} size="md" showAssignment={true} showCourse={true} />
               ))}
             </div>
           </div>

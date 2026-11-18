@@ -28,8 +28,14 @@ export const getAiEvaluation = (submissionId) =>
 export const reviewSubmission = (submissionId, data) =>
   client.post(`/assignments/submissions/${submissionId}/review`, data);
 
+export const updateGrade = (submissionId, data) =>
+  client.put(`/assignments/submissions/${submissionId}/grade`, data);
+
 export const getFinalGrade = (submissionId) =>
   client.get(`/assignments/submissions/${submissionId}/grade`);
+
+export const getGradeHistory = (submissionId) =>
+  client.get(`/assignments/submissions/${submissionId}/grade-history`);
 
 export const getMySubmissionForAssignment = (assignmentId) =>
   client.get(`/assignments/${assignmentId}/my-submission`);

@@ -44,7 +44,13 @@ const BADGE_CONFIGS = {
   },
 };
 
-export default function BadgePill({ badge, size = "md", showTooltip = true }) {
+export default function BadgePill({
+  badge,
+  size = "md",
+  showTooltip = true,
+  showAssignment = false,
+  showCourse = false,
+}) {
   const [hovered, setHovered] = useState(false);
   const cfg = BADGE_CONFIGS[badge.code] || {
     icon: badge.badge_icon || "ti-award",
@@ -56,6 +62,12 @@ export default function BadgePill({ badge, size = "md", showTooltip = true }) {
   };
 
   const isSmall = size === "sm";
+
+  // When showAssignment is requested (e.g. in course dashboard header), show "First Submitter in Assignment 1"
+  const label =
+    showAssignment && badge.assignment_title
+      ? `${cfg.title} in ${badge.assignment_title}`
+      : cfg.title;
 
   return (
     <div
@@ -95,7 +107,7 @@ export default function BadgePill({ badge, size = "md", showTooltip = true }) {
         <i className={`ti ${cfg.icon}`} style={{ fontSize: isSmall ? "10px" : "12px" }} />
       </div>
 
-      <span>{cfg.title}</span>
+      <span>{label}</span>
 
       {showTooltip && hovered && (
         <div
@@ -116,8 +128,21 @@ export default function BadgePill({ badge, size = "md", showTooltip = true }) {
             pointerEvents: "none",
           }}
         >
-          <div style={{ fontWeight: "700", marginBottom: "2px" }}>{cfg.title}</div>
+          <div style={{ fontWeight: "700", marginBottom: "2px" }}>
+            {cfg.title}
+            {badge.assignment_title ? ` in ${badge.assignment_title}` : ""}
+          </div>
           <div style={{ opacity: 0.9 }}>{badge.description || "Earned achievement"}</div>
+          {badge.assignment_title && (
+            <div style={{ fontSize: "10px", opacity: 0.85, marginTop: "3px" }}>
+              Assignment: {badge.assignment_title}
+            </div>
+          )}
+          {showCourse && badge.course_name && (
+            <div style={{ fontSize: "10px", opacity: 0.85, marginTop: "2px" }}>
+              Course: {badge.course_name}
+            </div>
+          )}
           {badge.earned_at && (
             <div style={{ fontSize: "10px", opacity: 0.7, marginTop: "4px" }}>
               Earned {new Date(badge.earned_at).toLocaleDateString()}

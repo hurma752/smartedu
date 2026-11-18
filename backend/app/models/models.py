@@ -194,6 +194,7 @@ class Submission(Base):
     assignment = relationship("Assignment", back_populates="submissions")
     ai_evaluation = relationship("AIEvaluation", back_populates="submission", uselist=False, cascade="all, delete-orphan")
     final_grade = relationship("FinalGrade", back_populates="submission", uselist=False, cascade="all, delete-orphan")
+    grade_history = relationship("GradeHistory", back_populates="submission", cascade="all, delete-orphan", order_by="GradeHistory.id.desc()")
     plagiarism_report = relationship("PlagiarismReport", back_populates="submission", uselist=False, cascade="all, delete-orphan", foreign_keys="[PlagiarismReport.submission_id]")
 
 
@@ -244,8 +245,32 @@ class FinalGrade(Base):
     teacher_comments = Column(Text, nullable=True)
     was_ai_overridden = Column(Boolean, default=False)
     reviewed_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, nullable=True)
 
     submission = relationship("Submission", back_populates="final_grade")
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+    history = relationship("GradeHistory", back_populates="final_grade", cascade="all, delete-orphan", order_by="GradeHistory.id.desc()")
+
+
+class GradeHistory(Base):
+    __tablename__ = "grade_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, index=True)
+    final_grade_id = Column(Integer, ForeignKey("final_grades.id", ondelete="CASCADE"), nullable=True, index=True)
+    previous_total_score = Column(Integer, nullable=False)
+    new_total_score = Column(Integer, nullable=False)
+    previous_criteria_scores = Column(JSON, nullable=False)
+    new_criteria_scores = Column(JSON, nullable=False)
+    previous_comments = Column(Text, nullable=True)
+    new_comments = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now())
+
+    submission = relationship("Submission", back_populates="grade_history")
+    final_grade = relationship("FinalGrade", back_populates="history")
+    updater = relationship("User", foreign_keys=[updated_by])
 
 
 class PasswordResetToken(Base):

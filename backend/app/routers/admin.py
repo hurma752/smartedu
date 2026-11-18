@@ -168,7 +168,7 @@ def delete_course(
 
     from app.models.models import (
         ClassSession, AttendanceRecord, Document, Assignment,
-        Submission, PlagiarismReport, AIEvaluation, FinalGrade,
+        Submission, PlagiarismReport, AIEvaluation, FinalGrade, GradeHistory,
         Rubric, RubricCriterion, ChatHistory, StudentAchievement,
         AssignmentDeadlineHistory
     )
@@ -202,6 +202,7 @@ def delete_course(
                 (PlagiarismReport.matched_submission_id.in_(submission_ids))
             ).delete(synchronize_session=False)
             db.query(AIEvaluation).filter(AIEvaluation.submission_id.in_(submission_ids)).delete(synchronize_session=False)
+            db.query(GradeHistory).filter(GradeHistory.submission_id.in_(submission_ids)).delete(synchronize_session=False)
             db.query(FinalGrade).filter(FinalGrade.submission_id.in_(submission_ids)).delete(synchronize_session=False)
             db.query(Submission).filter(Submission.id.in_(submission_ids)).delete(synchronize_session=False)
 

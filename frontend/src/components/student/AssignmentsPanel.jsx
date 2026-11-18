@@ -6,7 +6,7 @@ import * as badgesApi from "../../api/badges";
 import BadgePill from "../BadgePill";
 import { C } from "../../theme";
 
-export default function StudentAssignmentsPanel({ courseId }) {
+export default function StudentAssignmentsPanel({ courseId, onBadgeUpdate }) {
   const [assignments, setAssignments] = useState([]);
   const [submissionsByAssignment, setSubmissionsByAssignment] = useState({});
   const [grades, setGrades] = useState({});
@@ -28,10 +28,11 @@ export default function StudentAssignmentsPanel({ courseId }) {
       if (data.status === "teacher_reviewed") {
         const gradeRes = await assignmentsApi.getFinalGrade(submissionId);
         setGrades((prev) => ({ ...prev, [assignmentId]: gradeRes.data }));
+        onBadgeUpdate?.();
       }
       return data.status;
     } catch { return null; }
-  }, []);
+  }, [onBadgeUpdate]);
 
   const handleDeleteSubmission = async (assignmentId, submissionId) => {
     if (!confirm("Delete your submission? You can resubmit before the deadline.")) return;
@@ -39,6 +40,7 @@ export default function StudentAssignmentsPanel({ courseId }) {
       await assignmentsApi.deleteMySubmission(submissionId);
       setSubmissionsByAssignment((prev) => { const u = { ...prev }; delete u[assignmentId]; return u; });
       setGrades((prev) => { const u = { ...prev }; delete u[assignmentId]; return u; });
+      onBadgeUpdate?.();
     } catch (err) {
       setError(err.response?.data?.detail || "Couldn't delete submission.");
     }
@@ -46,7 +48,7 @@ export default function StudentAssignmentsPanel({ courseId }) {
 
   const loadExistingData = useCallback(async (list) => {
     try {
-      const { data: myBadges } = await badgesApi.getMyBadges();
+      const { data: myBadges } = await badgesApi.getMyBadges(courseId);
       const badgeMap = {};
       for (const b of myBadges) {
         if (b.assignment_id) {
@@ -937,7 +939,11 @@ function GradeDisplay({ grade }) {
       <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "8px", padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <span style={{ fontSize: "14px", fontWeight: "700", color: C.textPrimary, display: "block" }}>Final Score Awarded</span>
-          <span style={{ fontSize: "12px", color: C.textMuted }}>Evaluation completed and verified</span>
+          <span style={{ fontSize: "12px", color: C.textMuted }}>
+            {grade.updated_at
+              ? `Verified & revised by instructor on ${new Date(grade.updated_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`
+              : "Evaluation completed and verified"}
+          </span>
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: "4px" }}>
           <span style={{ fontSize: "32px", fontWeight: "800", letterSpacing: "-0.03em", color: C.primary }}>
@@ -954,12 +960,14 @@ function GradeDisplay({ grade }) {
             Criteria Score Breakdown
           </h5>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {feedback.criteria_feedback.map((cf, i) => (
+            {feedback.criteria_feedback.map((cf, i) => {
+              const actualScore = (grade.criteria_scores && (grade.criteria_scores[cf.key] ?? grade.criteria_scores[cf.criterion])) ?? cf.score;
+              return (
               <div key={i} style={{ borderRadius: "8px", border: `1px solid ${C.border}`, background: C.cardBg, overflow: "hidden" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: C.subtleBg, borderBottom: (cf.what_was_good || cf.what_was_missing) ? `1px solid ${C.border}` : "none" }}>
                   <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>{cf.label}</span>
                   <span style={{ fontSize: "12px", fontWeight: "700", color: C.infoText, background: C.infoBg, padding: "2px 8px", borderRadius: "20px", border: `1px solid ${C.infoBorder}` }}>
-                    {cf.score} / {cf.max_score}
+                    {actualScore} / {cf.max_score}
                   </span>
                 </div>
                 {(cf.what_was_good || cf.what_was_missing) && (
@@ -979,7 +987,8 @@ function GradeDisplay({ grade }) {
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
           </div>
         </div>
       )}

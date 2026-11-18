@@ -76,8 +76,8 @@ def evaluate_assignment_badges(assignment_id: int, db: Session):
 
     ach_map = {a.code: a for a in db.query(Achievement).all()}
 
-    # 1. EVALUATE FIRST SUBMITTER BADGE (Only after deadline has passed)
-    if due and now > due:
+    # 1. EVALUATE FIRST SUBMITTER BADGE (Evaluated when deadline passes or if no deadline set)
+    if not due or (due and now > due):
         # Check if first_submitter already awarded for this assignment
         first_sub_ach = ach_map.get("first_submitter")
         if first_sub_ach:
@@ -88,11 +88,14 @@ def evaluate_assignment_badges(assignment_id: int, db: Session):
 
             if not already_awarded:
                 # Find earliest valid submission submitted on or before deadline
-                earliest_sub = db.query(Submission).filter(
+                sub_filter = [
                     Submission.assignment_id == assignment_id,
                     Submission.status != "failed",
-                    Submission.submitted_at <= assignment.due_date
-                ).order_by(Submission.submitted_at.asc()).first()
+                ]
+                if assignment.due_date:
+                    sub_filter.append(Submission.submitted_at <= assignment.due_date)
+
+                earliest_sub = db.query(Submission).filter(*sub_filter).order_by(Submission.submitted_at.asc()).first()
 
                 if earliest_sub:
                     db.add(StudentAchievement(
@@ -139,6 +142,12 @@ def evaluate_assignment_badges(assignment_id: int, db: Session):
                         assignment_id=assignment_id,
                         course_id=assignment.course_id,
                     ))
+            elif high_ach:
+                db.query(StudentAchievement).filter(
+                    StudentAchievement.student_id == sub.student_id,
+                    StudentAchievement.achievement_id == high_ach.id,
+                    StudentAchievement.assignment_id == assignment_id
+                ).delete(synchronize_session=False)
 
             # Perfect Score Award
             if total_possible and score == total_possible and perfect_ach:
@@ -154,14 +163,35 @@ def evaluate_assignment_badges(assignment_id: int, db: Session):
                         assignment_id=assignment_id,
                         course_id=assignment.course_id,
                     ))
+            elif perfect_ach:
+                db.query(StudentAchievement).filter(
+                    StudentAchievement.student_id == sub.student_id,
+                    StudentAchievement.achievement_id == perfect_ach.id,
+                    StudentAchievement.assignment_id == assignment_id
+                ).delete(synchronize_session=False)
         db.commit()
 
 
-def get_student_badges(student_id: int, db: Session) -> list[dict]:
-    """Returns all badges earned by a student with assignment & course details."""
-    student_achs = db.query(StudentAchievement).filter(
+def evaluate_course_badges(course_id: int, db: Session):
+    """
+    Evaluates badges for all assignments in a course.
+    Ensures that any passed deadlines or reviewed submissions
+    have their achievements evaluated and awarded.
+    """
+    assignments = db.query(Assignment).filter(Assignment.course_id == course_id).all()
+    for a in assignments:
+        evaluate_assignment_badges(a.id, db)
+
+
+def get_student_badges(student_id: int, db: Session, course_id: int = None) -> list[dict]:
+    """Returns all badges earned by a student with assignment & course details, optionally filtered by course."""
+    query = db.query(StudentAchievement).filter(
         StudentAchievement.student_id == student_id
-    ).order_by(StudentAchievement.earned_at.desc()).all()
+    )
+    if course_id is not None:
+        query = query.filter(StudentAchievement.course_id == course_id)
+
+    student_achs = query.order_by(StudentAchievement.earned_at.desc()).all()
 
     results = []
     for sa in student_achs:
@@ -206,30 +236,11 @@ def get_assignment_badges(assignment_id: int, db: Session) -> list[dict]:
         })
     return results
 
+
 def get_student_badges_for_course(student_id: int, course_id: int, db: Session) -> list[dict]:
     """
     Same shape as get_student_badges(), scoped to one course — used by the
-    teacher-facing per-student analytics view so a student's badges from
-    other courses don't bleed into this course's summary.
+    teacher-facing per-student analytics view and student course dashboard
+    so a student's badges from other courses don't bleed into this course's summary.
     """
-    student_achs = db.query(StudentAchievement).filter(
-        StudentAchievement.student_id == student_id,
-        StudentAchievement.course_id == course_id,
-    ).order_by(StudentAchievement.earned_at.desc()).all()
-
-    results = []
-    for sa in student_achs:
-        ach = sa.achievement
-        asgn = sa.assignment
-        results.append({
-            "id": sa.id,
-            "code": ach.code,
-            "title": ach.title,
-            "description": ach.description,
-            "badge_icon": ach.badge_icon,
-            "color_scheme": ach.color_scheme,
-            "earned_at": sa.earned_at,
-            "assignment_id": sa.assignment_id,
-            "assignment_title": asgn.title if asgn else None,
-        })
-    return results
+    return get_student_badges(student_id, db, course_id=course_id)

@@ -1,11 +1,11 @@
 // src/pages/TeacherSubmissions.jsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import Layout, { PageShell, Btn } from "../components/Layout";
 import * as assignmentsApi from "../api/assignments";
 import BadgePill from "../components/BadgePill";
-import { C, T } from "../theme";
+import { C } from "../theme";
 
 export default function TeacherSubmissions() {
   const { assignmentId } = useParams();
@@ -21,6 +21,14 @@ export default function TeacherSubmissions() {
   const [loadingEval, setLoadingEval]   = useState(false);
   const [searchQuery, setSearchQuery]   = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  const [isEditingGrade, setIsEditingGrade]         = useState(false);
+  const [gradeHistory, setGradeHistory]             = useState([]);
+  const [showGradeHistoryModal, setShowGradeHistoryModal] = useState(false);
+  const [originalScores, setOriginalScores]         = useState({});
+  const [originalComments, setOriginalComments]     = useState("");
+  const [editReason, setEditReason]                 = useState("");
+  const [isSavingGrade, setIsSavingGrade]           = useState(false);
 
   const [assignment,      setAssignment]      = useState(null);
   const [badgesByStudent, setBadgesByStudent] = useState({});
@@ -70,41 +78,204 @@ export default function TeacherSubmissions() {
     setError("");
     setSaved(false);
     setAiEval(null);
+    setIsEditingGrade(false);
+    setEditReason("");
+    setGradeHistory([]);
+
     if (["ai_evaluated", "teacher_reviewed"].includes(submission.status)) {
       setLoadingEval(true);
       try {
-        const { data } = await assignmentsApi.getAiEvaluation(submission.id);
-        setAiEval(data);
-        setScores(data.criteria_scores || {});
-        setComments("");
+        const [evalRes, gradeRes, histRes] = await Promise.all([
+          assignmentsApi.getAiEvaluation(submission.id).catch(() => null),
+          submission.status === "teacher_reviewed"
+            ? assignmentsApi.getFinalGrade(submission.id).catch(() => null)
+            : Promise.resolve(null),
+          submission.status === "teacher_reviewed"
+            ? assignmentsApi.getGradeHistory(submission.id).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        if (evalRes?.data) {
+          setAiEval(evalRes.data);
+        }
+
+        if (gradeRes?.data) {
+          const loadedScores = gradeRes.data.criteria_scores || {};
+          const loadedComments = gradeRes.data.teacher_comments || "";
+          setScores(loadedScores);
+          setComments(loadedComments);
+          setOriginalScores(loadedScores);
+          setOriginalComments(loadedComments);
+        } else if (evalRes?.data) {
+          const loadedScores = evalRes.data.criteria_scores || {};
+          setScores(loadedScores);
+          setComments("");
+          setOriginalScores(loadedScores);
+          setOriginalComments("");
+        }
+
+        if (histRes?.data) {
+          setGradeHistory(histRes.data);
+        }
       } catch {
-        setError("Couldn't load AI evaluation.");
+        setError("Couldn't load evaluation details.");
       } finally {
         setLoadingEval(false);
       }
     }
   };
 
-  const handleScoreChange = (key, value) =>
-    setScores({ ...scores, [key]: Number(value) });
+  const criteriaList = useMemo(() => {
+    if (assignment?.criteria && assignment.criteria.length > 0) {
+      return assignment.criteria;
+    }
+    if (aiEval?.feedback) {
+      let parsed = aiEval.feedback;
+      if (typeof parsed === "string") {
+        try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+      }
+      if (parsed?.criteria_feedback && parsed.criteria_feedback.length > 0) {
+        return parsed.criteria_feedback.map((cf) => ({
+          key: cf.key,
+          label: cf.label || cf.criterion || cf.key,
+          max_marks: Number(cf.max_score) || 0,
+        }));
+      }
+    }
+    return [];
+  }, [assignment?.criteria, aiEval?.feedback]);
+
+  const rubricTotalMarks = useMemo(() => {
+    if (assignment?.total_marks && assignment.total_marks > 0) {
+      return assignment.total_marks;
+    }
+    if (criteriaList.length > 0) {
+      return criteriaList.reduce((sum, c) => sum + (Number(c.max_marks) || 0), 0);
+    }
+    return 0;
+  }, [assignment?.total_marks, criteriaList]);
+
+  const handleScoreChange = (key, value) => {
+    setError("");
+    if (value === "") {
+      setScores((prev) => ({ ...prev, [key]: "" }));
+      return;
+    }
+    const num = Number(value);
+    if (isNaN(num)) return;
+
+    const crit = criteriaList.find((c) => c.key === key || c.label === key);
+    const maxMarks = crit?.max_marks;
+
+    let sanitized = num;
+    if (sanitized < 0) {
+      sanitized = 0;
+    }
+    if (typeof maxMarks === "number" && sanitized > maxMarks) {
+      sanitized = maxMarks;
+      setError(`Cannot award more than ${maxMarks} marks for "${crit?.label || key}". Value set to maximum allowed.`);
+    }
+
+    setScores((prev) => ({ ...prev, [key]: sanitized }));
+  };
+
+  const handleCancelEdit = () => {
+    setScores(originalScores);
+    setComments(originalComments);
+    setEditReason("");
+    setIsEditingGrade(false);
+    setError("");
+  };
+
+  const totalScore = Object.values(scores).reduce((sum, v) => sum + (Number(v) || 0), 0);
+
+  const isAnyCriterionExceeded = Object.entries(scores).some(([key, val]) => {
+    if (val === "" || isNaN(Number(val))) return false;
+    const num = Number(val);
+    if (num < 0) return true;
+    const crit = criteriaList.find((c) => c.key === key || c.label === key);
+    return crit && typeof crit.max_marks === "number" && num > crit.max_marks;
+  });
+  const isTotalExceeded = rubricTotalMarks > 0 && totalScore > rubricTotalMarks;
+  const isGradeInvalid = isAnyCriterionExceeded || isTotalExceeded;
 
   const handleSubmitReview = async () => {
     if (!selected) return;
     setError("");
+
+    // Validate each criterion score against limits
+    const normalizedScores = {};
+    for (const [key, val] of Object.entries(scores)) {
+      if (val === "" || val === undefined || isNaN(Number(val))) {
+        setError("Please enter a valid numeric mark for all criteria.");
+        return;
+      }
+      const numVal = Math.round(Number(val));
+      if (numVal < 0) {
+        setError("Marks cannot be negative.");
+        return;
+      }
+      const crit = criteriaList.find((c) => c.key === key || c.label === key);
+      const maxMarks = crit?.max_marks;
+      if (typeof maxMarks === "number" && numVal > maxMarks) {
+        setError(`Marks for "${crit?.label || key}" (${numVal}) cannot exceed maximum allowed marks (${maxMarks}).`);
+        return;
+      }
+      normalizedScores[key] = numVal;
+    }
+
+    // Ensure all criteria defined in the rubric are scored
+    if (criteriaList.length > 0) {
+      for (const crit of criteriaList) {
+        if (normalizedScores[crit.key] === undefined && normalizedScores[crit.label] === undefined) {
+          setError(`Please award marks for "${crit.label}".`);
+          return;
+        }
+      }
+    }
+
+    // Ensure total awarded marks do not exceed rubric total marks
+    const currentTotal = Object.values(normalizedScores).reduce((sum, v) => sum + v, 0);
+    if (rubricTotalMarks > 0 && currentTotal > rubricTotalMarks) {
+      setError(`Total awarded marks (${currentTotal}) cannot exceed the rubric total of ${rubricTotalMarks} marks.`);
+      return;
+    }
+
+    setIsSavingGrade(true);
     try {
-      await assignmentsApi.reviewSubmission(selected.id, {
-        criteria_scores: scores,
+      const isUpdate = selected.status === "teacher_reviewed";
+      const payload = {
+        criteria_scores: normalizedScores,
         teacher_comments: comments,
-      });
+        reason: editReason || undefined,
+      };
+
+      if (isUpdate) {
+        await assignmentsApi.updateGrade(selected.id, payload);
+      } else {
+        await assignmentsApi.reviewSubmission(selected.id, payload);
+      }
+
       setSaved(true);
+      setIsEditingGrade(false);
+      setOriginalScores(normalizedScores);
+      setScores(normalizedScores);
+      setOriginalComments(comments);
+      setEditReason("");
       loadSubmissions();
       setSelected((prev) => prev ? { ...prev, status: "teacher_reviewed" } : prev);
+
+      // Refresh grade history
+      try {
+        const { data: hist } = await assignmentsApi.getGradeHistory(selected.id);
+        setGradeHistory(hist);
+      } catch { /* ignore */ }
     } catch (err) {
       setError(err.response?.data?.detail || "Couldn't save review.");
+    } finally {
+      setIsSavingGrade(false);
     }
   };
-
-  const totalScore = Object.values(scores).reduce((sum, v) => sum + (Number(v) || 0), 0);
 
   // Counters for header stats
   const graded    = submissions.filter((s) => s.status === "teacher_reviewed").length;
@@ -237,8 +408,20 @@ export default function TeacherSubmissions() {
                   </div>
                 </div>
 
-                {/* PDF Actions */}
-                <div style={{ display: "flex", gap: "8px" }}>
+                {/* PDF Actions & Edit Grade */}
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  {selected.status === "teacher_reviewed" && !isEditingGrade && (
+                    <ActionBtn
+                      icon="ti-edit"
+                      label="Edit Grade"
+                      variant="accent"
+                      onClick={() => {
+                        setIsEditingGrade(true);
+                        setSaved(false);
+                        setError("");
+                      }}
+                    />
+                  )}
                   <ActionBtn icon="ti-eye"      label="View PDF"    onClick={() => assignmentsApi.viewSubmissionFile(selected.id)} />
                   <ActionBtn icon="ti-download" label="Download"    onClick={() => assignmentsApi.downloadSubmissionFile(selected.id)} />
                 </div>
@@ -312,24 +495,188 @@ export default function TeacherSubmissions() {
                     <ScoreCard
                       scores={scores}
                       totalScore={totalScore}
+                      criteriaList={criteriaList}
+                      rubricTotalMarks={rubricTotalMarks}
                       onScoreChange={handleScoreChange}
-                      alreadyGraded={selected.status === "teacher_reviewed"}
+                      alreadyGraded={selected.status === "teacher_reviewed" && !isEditingGrade}
+                      isEditing={isEditingGrade}
                     />
                     <CommentsCard
                       value={comments}
                       onChange={setComments}
-                      alreadyGraded={selected.status === "teacher_reviewed"}
+                      alreadyGraded={selected.status === "teacher_reviewed" && !isEditingGrade}
+                      isEditing={isEditingGrade}
                     />
                     {selected.status !== "teacher_reviewed" ? (
                       <button
                         onClick={handleSubmitReview}
+                        disabled={isSavingGrade || isGradeInvalid}
                         className="btn-interactive"
-                        style={{ width: "100%", padding: "13px", borderRadius: "8px", border: "none", background: C.primary, color: C.primaryText, fontSize: "14px", fontWeight: "600", fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+                        title={isGradeInvalid ? (isAnyCriterionExceeded ? "Marks exceed criterion limit" : "Total marks exceed rubric limit") : "Approve and finalize grade"}
+                        style={{
+                          width: "100%",
+                          padding: "13px",
+                          borderRadius: "8px",
+                          border: "none",
+                          background: isGradeInvalid ? C.border : C.primary,
+                          color: isGradeInvalid ? C.textMuted : C.primaryText,
+                          fontSize: "14px",
+                          fontWeight: "600",
+                          fontFamily: "inherit",
+                          cursor: isSavingGrade || isGradeInvalid ? "not-allowed" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "8px",
+                        }}
                       >
-                        <i className="ti ti-check" style={{ fontSize: "16px" }} />Approve & finalize grade
+                        <i className={`ti ${isSavingGrade ? "ti-loader-2" : "ti-check"}`} style={{ fontSize: "16px", animation: isSavingGrade ? "spin 1s linear infinite" : "none" }} />
+                        {isSavingGrade ? "Saving grade…" : "Approve & finalize grade"}
                       </button>
+                    ) : !isEditingGrade ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                          <InlineBanner variant="success" style={{ margin: 0, flex: 1 }}>
+                            This submission has been graded.
+                          </InlineBanner>
+                          {gradeHistory.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowGradeHistoryModal(true)}
+                              className="btn-interactive"
+                              title="View revision history for this grade"
+                              style={{
+                                padding: "7px 12px",
+                                borderRadius: "6px",
+                                border: `1px solid ${C.border}`,
+                                background: C.cardBg,
+                                color: C.textSecondary,
+                                fontSize: "12px",
+                                fontWeight: "600",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                              }}
+                            >
+                              <i className="ti ti-history" style={{ fontSize: "14px", color: C.accent }} />
+                              History ({gradeHistory.length})
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          id="btn-edit-grade"
+                          onClick={() => {
+                            setIsEditingGrade(true);
+                            setSaved(false);
+                            setError("");
+                          }}
+                          className="btn-interactive"
+                          style={{
+                            width: "100%",
+                            padding: "13px",
+                            borderRadius: "8px",
+                            border: `1.5px solid ${C.accent}`,
+                            background: C.accentTint,
+                            color: C.accentText,
+                            fontSize: "14px",
+                            fontWeight: "700",
+                            fontFamily: "inherit",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <i className="ti ti-edit" style={{ fontSize: "16px" }} />
+                          Edit Grade
+                        </button>
+                      </div>
                     ) : (
-                      <InlineBanner variant="success">This submission has been graded.</InlineBanner>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "8px", padding: "12px 14px" }}>
+                          <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: C.textPrimary, marginBottom: "6px" }}>
+                            Revision Reason <span style={{ fontWeight: "400", color: C.textMuted }}>(optional)</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={editReason}
+                            onChange={(e) => setEditReason(e.target.value)}
+                            placeholder="e.g. Re-evaluated criterion 2, corrected marks"
+                            style={{
+                              width: "100%",
+                              boxSizing: "border-box",
+                              background: C.inputBg,
+                              border: `1px solid ${C.border}`,
+                              borderRadius: "6px",
+                              padding: "8px 10px",
+                              fontSize: "13px",
+                              color: C.textPrimary,
+                              fontFamily: "inherit",
+                              outline: "none",
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={handleCancelEdit}
+                            disabled={isSavingGrade}
+                            className="btn-interactive"
+                            style={{
+                              flex: "1",
+                              padding: "12px",
+                              borderRadius: "8px",
+                              border: `1px solid ${C.border}`,
+                              background: C.cardBg,
+                              color: C.textSecondary,
+                              fontSize: "13px",
+                              fontWeight: "600",
+                              fontFamily: "inherit",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "6px",
+                            }}
+                          >
+                            <i className="ti ti-x" style={{ fontSize: "15px" }} />
+                            Cancel
+                          </button>
+
+                          <button
+                            type="button"
+                            id="btn-save-revised-grade"
+                            onClick={handleSubmitReview}
+                            disabled={isSavingGrade || isGradeInvalid}
+                            className="btn-interactive"
+                            title={isGradeInvalid ? (isAnyCriterionExceeded ? "Marks exceed criterion limit" : "Total marks exceed rubric limit") : "Save revised grade"}
+                            style={{
+                              flex: "2",
+                              padding: "12px",
+                              borderRadius: "8px",
+                              border: "none",
+                              background: isGradeInvalid ? C.border : C.primary,
+                              color: isGradeInvalid ? C.textMuted : C.primaryText,
+                              fontSize: "14px",
+                              fontWeight: "700",
+                              fontFamily: "inherit",
+                              cursor: isSavingGrade || isGradeInvalid ? "not-allowed" : "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <i className={`ti ${isSavingGrade ? "ti-loader-2" : "ti-device-floppy"}`} style={{ fontSize: "16px", animation: isSavingGrade ? "spin 1s linear infinite" : "none" }} />
+                            {isSavingGrade ? "Saving revision…" : "Save Revised Grade"}
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -349,6 +696,14 @@ export default function TeacherSubmissions() {
 
         {showHistory && (
           <DeadlineHistoryModal history={history} onClose={() => setShowHistory(false)} />
+        )}
+
+        {showGradeHistoryModal && (
+          <GradeHistoryModal
+            history={gradeHistory}
+            studentName={selected?.student_name}
+            onClose={() => setShowGradeHistoryModal(false)}
+          />
         )}
       </PageShell>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -380,7 +735,7 @@ function StudentRow({ submission: s, badges = [], isSelected, isLast, onClick })
 
   const cta = {
     ai_evaluated:     { label: "Review & grade", icon: "ti-clipboard-check", style: { background: C.primary, color: C.primaryText, border: "none" } },
-    teacher_reviewed: { label: "View grade",     icon: "ti-eye",             style: { background: "transparent", color: C.textSecondary, border: `1px solid ${C.border}` } },
+    teacher_reviewed: { label: "View / Edit",    icon: "ti-edit",            style: { background: "transparent", color: C.textSecondary, border: `1px solid ${C.border}` } },
     failed:           { label: "View details",   icon: "ti-eye",             style: { background: "transparent", color: C.dangerText, border: `1px solid ${C.dangerBorder}` } },
     processing:       { label: "AI evaluating…", icon: "ti-loader-2",        style: { background: "transparent", color: C.textMuted, border: `1px solid ${C.border}`, cursor: "not-allowed", opacity: 0.6 }, disabled: true },
     extracted:        { label: "AI evaluating…", icon: "ti-loader-2",        style: { background: "transparent", color: C.textMuted, border: `1px solid ${C.border}`, cursor: "not-allowed", opacity: 0.6 }, disabled: true },
@@ -460,12 +815,26 @@ function StatusPill({ status }) {
   );
 }
 
-function ActionBtn({ icon, label, onClick }) {
+function ActionBtn({ icon, label, onClick, variant = "default" }) {
+  const isAccent = variant === "accent";
   return (
     <button
       onClick={onClick}
       className="btn-interactive"
-      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "7px 12px", borderRadius: "6px", background: C.subtleBg, border: `1px solid ${C.border}`, color: C.textPrimary, fontSize: "13px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "7px 12px",
+        borderRadius: "6px",
+        background: isAccent ? C.accentTint : C.subtleBg,
+        border: `1px solid ${isAccent ? C.accentBorder : C.border}`,
+        color: isAccent ? C.accentText : C.textPrimary,
+        fontSize: "13px",
+        fontWeight: "600",
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
     >
       <i className={`ti ${icon}`} style={{ fontSize: "15px" }} />
       {label}
@@ -789,54 +1158,186 @@ function AIFeedback({ eval_ }) {
   );
 }
 
-function ScoreCard({ scores, totalScore, onScoreChange, alreadyGraded }) {
+function ScoreCard({
+  scores,
+  totalScore,
+  criteriaList = [],
+  rubricTotalMarks = 0,
+  onScoreChange,
+  alreadyGraded,
+  isEditing,
+}) {
+  const criteriaKeys = new Set(criteriaList.map((c) => c.key));
+  const criteriaLabels = new Set(criteriaList.map((c) => c.label));
+
+  const items = criteriaList.map((c) => {
+    const val = scores[c.key] !== undefined ? scores[c.key] : (scores[c.label] !== undefined ? scores[c.label] : 0);
+    return {
+      key: c.key,
+      label: c.label || c.key.replace(/_/g, " "),
+      maxMarks: c.max_marks,
+      description: c.description,
+      value: val,
+    };
+  });
+
+  for (const [k, v] of Object.entries(scores)) {
+    if (!criteriaKeys.has(k) && !criteriaLabels.has(k)) {
+      items.push({
+        key: k,
+        label: k.replace(/_/g, " "),
+        maxMarks: undefined,
+        description: null,
+        value: v,
+      });
+    }
+  }
+
   return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: isEditing ? `1.5px solid ${C.accent}` : `1px solid ${C.border}`, overflow: "hidden" }}>
       <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
-        <i className="ti ti-clipboard-check" style={{ fontSize: "15px", color: C.textMuted }} />
-        <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Scores</span>
-        {alreadyGraded && (
+        <i className="ti ti-clipboard-check" style={{ fontSize: "15px", color: isEditing ? C.accent : C.textMuted }} />
+        <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Rubric Scores</span>
+        {isEditing ? (
+          <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "700", color: C.accentText, background: C.accentTint, padding: "2px 8px", borderRadius: "20px", border: `1px solid ${C.accentBorder}` }}>
+            Editing Marks
+          </span>
+        ) : alreadyGraded ? (
           <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "600", color: C.successText, background: C.successBg, padding: "2px 8px", borderRadius: "20px", border: `1px solid ${C.successBorder}` }}>
             Finalized
           </span>
-        )}
+        ) : null}
       </div>
       <div style={{ padding: "14px 16px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {Object.entries(scores).map(([key, value]) => (
-            <div key={key} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <label style={{ flex: 1, fontSize: "13px", color: C.textPrimary, textTransform: "capitalize", fontWeight: "500" }}>
-                {key.replace(/_/g, " ")}
-              </label>
-              <input
-                type="number" min="0"
-                value={value}
-                disabled={alreadyGraded}
-                onChange={(e) => onScoreChange(key, e.target.value)}
-                style={{ width: "64px", background: alreadyGraded ? C.subtleBg : C.inputBg, border: `1.5px solid ${C.border}`, borderRadius: "6px", padding: "6px 8px", fontSize: "14px", fontWeight: "600", color: C.textPrimary, fontFamily: "inherit", outline: "none", textAlign: "center", cursor: alreadyGraded ? "default" : "text" }}
-                onFocus={(e) => { if (!alreadyGraded) { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; } }}
-                onBlur={(e)  => { e.target.style.borderColor = C.border; e.target.style.background = alreadyGraded ? C.subtleBg : C.inputBg; e.target.style.boxShadow = "none"; }}
-              />
-            </div>
-          ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {items.map((item) => {
+            const isOverMax = typeof item.maxMarks === "number" && Number(item.value) > item.maxMarks;
+            const isNegative = Number(item.value) < 0;
+            const hasError = isOverMax || isNegative;
+
+            return (
+              <div key={item.key} style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <label style={{ display: "block", fontSize: "13px", color: C.textPrimary, textTransform: "capitalize", fontWeight: "500", lineHeight: "1.3" }}>
+                      {item.label}
+                    </label>
+                    {item.description && (
+                      <span style={{ fontSize: "11px", color: C.textMuted, display: "block", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.description}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max={item.maxMarks}
+                      value={item.value}
+                      disabled={alreadyGraded}
+                      onChange={(e) => onScoreChange(item.key, e.target.value)}
+                      onBlur={(e) => {
+                        if (!alreadyGraded) {
+                          e.target.style.borderColor = hasError ? C.dangerBorder : isEditing ? C.accent : C.border;
+                          e.target.style.background = alreadyGraded ? C.subtleBg : hasError ? C.dangerBg : C.inputBg;
+                          e.target.style.boxShadow = "none";
+                          if (e.target.value === "" || isNaN(Number(e.target.value))) {
+                            onScoreChange(item.key, 0);
+                          }
+                        }
+                      }}
+                      onFocus={(e) => {
+                        if (!alreadyGraded) {
+                          e.target.style.borderColor = hasError ? C.dangerBorder : C.focusBorder;
+                          e.target.style.background = C.inputFocus;
+                          e.target.style.boxShadow = hasError
+                            ? "0 0 0 3px rgba(239, 68, 68, 0.15)"
+                            : "0 0 0 3px rgba(17,17,17,0.08)";
+                        }
+                      }}
+                      style={{
+                        width: "60px",
+                        background: alreadyGraded ? C.subtleBg : hasError ? C.dangerBg : C.inputBg,
+                        border: `1.5px solid ${hasError ? C.dangerBorder : isEditing ? C.accent : C.border}`,
+                        borderRadius: "6px",
+                        padding: "6px 8px",
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        color: hasError ? C.dangerText : C.textPrimary,
+                        fontFamily: "inherit",
+                        outline: "none",
+                        textAlign: "center",
+                        cursor: alreadyGraded ? "default" : "text",
+                      }}
+                    />
+                    {typeof item.maxMarks === "number" && (
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: C.textMuted, minWidth: "38px" }}>
+                        / {item.maxMarks}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {hasError && (
+                  <span style={{ fontSize: "11px", color: C.dangerText, fontWeight: "600", textAlign: "right" }}>
+                    {isOverMax
+                      ? `Exceeds max allowed (${item.maxMarks} marks)`
+                      : "Marks cannot be negative"}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
+
         {/* Total */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", paddingTop: "12px", borderTop: `2px solid ${C.border}` }}>
-          <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary }}>Total</span>
-          <span style={{ fontSize: "22px", fontWeight: "800", letterSpacing: "-0.03em", color: C.textPrimary }}>{totalScore}</span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "14px", paddingTop: "12px", borderTop: `2px solid ${C.border}` }}>
+          <div>
+            <span style={{ fontSize: "13px", fontWeight: "700", color: C.textPrimary, display: "block" }}>Total Marks</span>
+            {rubricTotalMarks > 0 && totalScore > rubricTotalMarks && (
+              <span style={{ fontSize: "11px", color: C.dangerText, fontWeight: "600" }}>
+                Exceeds rubric total ({rubricTotalMarks})
+              </span>
+            )}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <span
+              style={{
+                fontSize: "22px",
+                fontWeight: "800",
+                letterSpacing: "-0.03em",
+                color: rubricTotalMarks > 0 && totalScore > rubricTotalMarks
+                  ? C.dangerText
+                  : isEditing
+                  ? C.accent
+                  : C.textPrimary,
+              }}
+            >
+              {totalScore}
+            </span>
+            {rubricTotalMarks > 0 && (
+              <span style={{ fontSize: "13px", fontWeight: "600", color: C.textMuted, marginLeft: "4px" }}>
+                / {rubricTotalMarks}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function CommentsCard({ value, onChange, alreadyGraded }) {
+function CommentsCard({ value, onChange, alreadyGraded, isEditing }) {
   return (
-    <div style={{ background: C.cardBg, borderRadius: "8px", border: `1px solid ${C.border}`, overflow: "hidden" }}>
+    <div style={{ background: C.cardBg, borderRadius: "8px", border: isEditing ? `1.5px solid ${C.accent}` : `1px solid ${C.border}`, overflow: "hidden" }}>
       <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: "8px" }}>
-        <i className="ti ti-message" style={{ fontSize: "15px", color: C.textMuted }} />
+        <i className="ti ti-message" style={{ fontSize: "15px", color: isEditing ? C.accent : C.textMuted }} />
         <span style={{ fontSize: "13px", fontWeight: "600", color: C.textPrimary }}>Your Comments</span>
-        <span style={{ fontSize: "11px", color: C.textMuted, marginLeft: "2px" }}>(optional)</span>
+        <span style={{ fontSize: "11px", color: C.textMuted, marginLeft: "2px" }}>{isEditing ? "(editable)" : "(optional)"}</span>
+        {isEditing && (
+          <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "700", color: C.accentText, background: C.accentTint, padding: "2px 8px", borderRadius: "20px", border: `1px solid ${C.accentBorder}` }}>
+            Editing Feedback
+          </span>
+        )}
       </div>
       <div style={{ padding: "12px 16px" }}>
         <textarea
@@ -845,9 +1346,9 @@ function CommentsCard({ value, onChange, alreadyGraded }) {
           onChange={(e) => onChange(e.target.value)}
           rows={3}
           placeholder="Add anything the AI feedback missed…"
-          style={{ width: "100%", background: alreadyGraded ? C.subtleBg : C.inputBg, border: "1.5px solid transparent", borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", cursor: alreadyGraded ? "default" : "text" }}
+          style={{ width: "100%", background: alreadyGraded ? C.subtleBg : C.inputBg, border: `1.5px solid ${isEditing ? C.accent : "transparent"}`, borderRadius: "6px", padding: "9px 12px", fontSize: "13px", color: C.textPrimary, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", cursor: alreadyGraded ? "default" : "text" }}
           onFocus={(e) => { if (!alreadyGraded) { e.target.style.borderColor = C.focusBorder; e.target.style.background = C.inputFocus; e.target.style.boxShadow = "0 0 0 3px rgba(17,17,17,0.08)"; } }}
-          onBlur={(e)  => { e.target.style.borderColor = "transparent"; e.target.style.background = alreadyGraded ? C.subtleBg : C.inputBg; e.target.style.boxShadow = "none"; }}
+          onBlur={(e)  => { e.target.style.borderColor = isEditing ? C.accent : "transparent"; e.target.style.background = alreadyGraded ? C.subtleBg : C.inputBg; e.target.style.boxShadow = "none"; }}
         />
       </div>
     </div>
@@ -955,6 +1456,91 @@ function DeadlineHistoryModal({ history, onClose }) {
               {h.reason && <p style={{ fontSize: "12px", color: C.textSecondary, margin: "4px 0 0" }}>"{h.reason}"</p>}
             </div>
           ))
+        )}
+      </div>
+    </ModalOverlay>
+  );
+}
+
+function GradeHistoryModal({ history, studentName, onClose }) {
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <span style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary, display: "block" }}>Grade Revision History</span>
+          {studentName && <span style={{ fontSize: "12px", color: C.textMuted }}>{studentName}</span>}
+        </div>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted, padding: "4px" }}>
+          <i className="ti ti-x" style={{ fontSize: "16px" }} />
+        </button>
+      </div>
+      <div style={{ padding: history && history.length ? "8px 0" : "32px 20px", textAlign: history && history.length ? "left" : "center", maxHeight: "60vh", overflowY: "auto" }}>
+        {!history || history.length === 0 ? (
+          <>
+            <i className="ti ti-history-toggle-off" style={{ fontSize: "28px", color: C.border, display: "block", marginBottom: "8px" }} />
+            <p style={{ fontSize: "13px", color: C.textMuted, margin: 0 }}>No revisions recorded yet.</p>
+          </>
+        ) : (
+          history.map((h, i) => {
+            const diff = h.new_total_score - h.previous_total_score;
+            return (
+              <div key={h.id || i} style={{ padding: "14px 20px", borderBottom: i === history.length - 1 ? "none" : `1px solid ${C.border}`, background: i === 0 ? C.subtleBg : "transparent" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px" }}>
+                    <span style={{ color: C.textMuted, textDecoration: "line-through", fontWeight: "600" }}>
+                      {h.previous_total_score} pts
+                    </span>
+                    <i className="ti ti-arrow-right" style={{ fontSize: "12px", color: C.textMuted }} />
+                    <span style={{ fontWeight: "700", color: C.primary }}>
+                      {h.new_total_score} pts
+                    </span>
+                    <span style={{
+                      fontSize: "11px", fontWeight: "700", padding: "1px 6px", borderRadius: "10px",
+                      background: diff > 0 ? C.successBg : diff < 0 ? C.dangerBg : C.subtleBg,
+                      color: diff > 0 ? C.successText : diff < 0 ? C.dangerText : C.textMuted,
+                      border: `1px solid ${diff > 0 ? C.successBorder : diff < 0 ? C.dangerBorder : C.border}`
+                    }}>
+                      {diff > 0 ? `+${diff}` : diff}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "11px", color: C.textMuted }}>
+                    {new Date(h.updated_at).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+                <p style={{ fontSize: "12px", color: C.textMuted, margin: "0 0 6px" }}>
+                  Revised by <strong>{h.updated_by_name || "Instructor"}</strong>
+                </p>
+                {h.reason && (
+                  <div style={{ background: C.cardBg, border: `1px solid ${C.border}`, borderRadius: "6px", padding: "6px 10px", marginBottom: "8px", fontSize: "12px", color: C.textSecondary }}>
+                    <strong style={{ color: C.textPrimary }}>Reason:</strong> {h.reason}
+                  </div>
+                )}
+                {h.new_criteria_scores && Object.keys(h.new_criteria_scores).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                    {Object.entries(h.new_criteria_scores).map(([k, newVal]) => {
+                      const oldVal = h.previous_criteria_scores ? h.previous_criteria_scores[k] : undefined;
+                      const cDiff = oldVal !== undefined ? newVal - oldVal : null;
+                      return (
+                        <span key={k} style={{ fontSize: "11px", padding: "2px 7px", borderRadius: "4px", background: C.cardBg, border: `1px solid ${C.border}`, color: C.textPrimary, textTransform: "capitalize" }}>
+                          {k.replace(/_/g, " ")}: {oldVal !== undefined && oldVal !== newVal ? `${oldVal} ➔ ` : ""}{newVal}
+                          {cDiff !== null && cDiff !== 0 && (
+                            <span style={{ color: cDiff > 0 ? C.successText : C.dangerText, marginLeft: "4px", fontWeight: "700" }}>
+                              ({cDiff > 0 ? `+${cDiff}` : cDiff})
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {h.new_comments && (
+                  <p style={{ fontSize: "12px", color: C.textSecondary, margin: "6px 0 0", fontStyle: "italic" }}>
+                    Feedback: "{h.new_comments}"
+                  </p>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </ModalOverlay>

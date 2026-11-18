@@ -4,9 +4,11 @@ import { useParams, useLocation } from "react-router-dom";
 import Layout, { PageShell, Card, CardHeader } from "../components/Layout";
 import StudentAssignmentsPanel from "../components/student/AssignmentsPanel";
 import StudentProgressPanel from "../components/student/StudentProgressPanel";
+import BadgePill from "../components/BadgePill";
 import * as coursesApi from "../api/courses";
 import * as documentsApi from "../api/documents";
 import * as chatApi from "../api/chat";
+import * as badgesApi from "../api/badges";
 import { C } from "../theme";
 
 export default function StudentCourseDetail() {
@@ -18,6 +20,7 @@ export default function StudentCourseDetail() {
 
   const [course,    setCourse]    = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [badges,    setBadges]    = useState([]);
 
   // Chat state & Multi-Session Management
   const [sessionId, setSessionId] = useState(() => {
@@ -62,13 +65,23 @@ export default function StudentCourseDetail() {
     }
   }, [courseId, sessionId]);
 
+  const loadBadges = useCallback(async () => {
+    try {
+      const { data } = await badgesApi.getMyBadges(courseId);
+      setBadges(data || []);
+    } catch {
+      setBadges([]);
+    }
+  }, [courseId]);
+
   useEffect(() => {
     coursesApi.getCourse(courseId).then(({ data }) => setCourse(data));
     documentsApi.listDocuments(courseId).then(({ data }) =>
       setDocuments(data.filter((d) => d.status === "indexed"))
     );
+    loadBadges();
     loadHistory();
-  }, [courseId, loadHistory]);
+  }, [courseId, loadBadges, loadHistory]);
 
   // Always keep localStorage in sync with the active session, including the very
   // first auto-generated sessionId (which otherwise never got persisted, causing
@@ -225,6 +238,74 @@ export default function StudentCourseDetail() {
     <Layout>
       <PageShell title={tabLabel} subtitle={`${course.name} · ${course.code}`}>
 
+        {/* ── Course Achievements Showcase ── */}
+        {badges.length > 0 && (
+          <div
+            className="animate-fade-in card-hover-elevate"
+            style={{
+              background: C.cardBg,
+              borderRadius: "10px",
+              border: `1px solid ${C.border}`,
+              padding: "16px 20px",
+              marginBottom: "24px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "12px",
+                flexWrap: "wrap",
+                gap: "8px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "8px",
+                    background: C.accentTint,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: C.accent,
+                  }}
+                >
+                  <i className="ti ti-award" style={{ fontSize: "20px" }} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: "15px", fontWeight: "700", color: C.textPrimary, margin: 0 }}>
+                    Course Achievements ({badges.length})
+                  </h3>
+                  <span style={{ fontSize: "12px", color: C.textMuted }}>
+                    Achievements unlocked in {course.name}
+                  </span>
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: "600",
+                  color: C.accentText,
+                  background: C.accentTint,
+                  padding: "4px 10px",
+                  borderRadius: "12px",
+                  letterSpacing: "0.03em",
+                }}
+              >
+                Course Badges
+              </span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {badges.map((b) => (
+                <BadgePill key={b.id} badge={b} size="md" showAssignment={true} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Lecture Materials ── */}
         {activeTab === "materials" && (
           <>
@@ -257,7 +338,7 @@ export default function StudentCourseDetail() {
 
         {/* ── Assignments ── */}
         {activeTab === "assignments" && (
-          <StudentAssignmentsPanel courseId={courseId} />
+          <StudentAssignmentsPanel courseId={courseId} onBadgeUpdate={loadBadges} />
         )}
 
         {/* ── Progress Analytics ── */}
